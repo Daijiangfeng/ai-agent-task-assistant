@@ -1,0 +1,39 @@
+# Web Framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+
+# LLM & Agent
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langgraph>=0.2.0
+
+# Database
+asyncpg>=0.29.0
+sqlalchemy[asyncio]>=2.0.0
+alembic>=1.13.0
+
+# Redis
+redis>=5.0.0
+
+# RAG & Vector Store
+chromadb>=0.5.0
+pypdf>=5.0.0
+python-docx>=1.1.0
+
+# Tools
+tavily-python>=0.5.0
+
+# Utils
+python-dotenv>=1.0.0
+httpx>=0.27.0
+tenacity>=9.0.0
+structlog>=24.0.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+
+# Lint / Quality gate
+ruff>=0.6.0
