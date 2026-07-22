@@ -450,9 +450,10 @@ ai-agent-task-assistant/
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `ZHIPU_API_KEY` | (必填) | 智谱 GLM API Key |
-| `ZHIPU_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4/` | 智谱 API 地址 |
+| `ANTHROPIC_AUTH_TOKEN` | (必填) | 智谱 GLM Anthropic 兼容端点 API Key（https://open.bigmodel.cn 申请） |
+| `ANTHROPIC_BASE_URL` | `https://open.bigmodel.cn/api/anthropic` | 智谱 Anthropic 兼容端点地址 |
 | `ZHIPU_MODEL` | `glm-4-plus` | 默认模型 |
+| `ZHIPU_OPENAI_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4/` | 智谱 OpenAI 兼容端点（仅用于 Embedding） |
 | `ZHIPU_EMBEDDING_MODEL` | `embedding-3` | 智谱 Embedding 模型 |
 | `TAVILY_API_KEY` | (可选) | Tavily 搜索 API Key，未填则不注册 Web 搜索工具 |
 | `WEB_SEARCH_MAX_RESULTS` | `5` | Web 搜索返回结果数 |
