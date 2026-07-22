@@ -21,15 +21,24 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
 
-    # ---- 智谱 LLM 配置 ----
-    ZHIPU_API_KEY: str = Field(default="", description="智谱 GLM API Key")
-    ZHIPU_BASE_URL: str = Field(
-        default="https://open.bigmodel.cn/api/paas/v4/",
-        description="智谱 OpenAI Compatible API 基础地址",
+    # ---- 智谱 LLM 配置（Anthropic 兼容端点） ----
+    ANTHROPIC_AUTH_TOKEN: str = Field(
+        default="",
+        description="智谱 GLM Anthropic 兼容端点 API Key（https://open.bigmodel.cn 申请）",
+    )
+    ANTHROPIC_BASE_URL: str = Field(
+        default="https://open.bigmodel.cn/api/anthropic",
+        description="智谱 Anthropic Compatible API 基础地址",
     )
     ZHIPU_MODEL: str = Field(default="glm-4-plus", description="默认模型名称")
     ZHIPU_TEMPERATURE: float = Field(default=0.7, ge=0.0, le=2.0)
     ZHIPU_MAX_TOKENS: int = Field(default=4096, ge=1)
+
+    # ---- 智谱 OpenAI 兼容端点（Embedding 专用） ----
+    ZHIPU_OPENAI_BASE_URL: str = Field(
+        default="https://open.bigmodel.cn/api/paas/v4/",
+        description="智谱 OpenAI Compatible API 基础地址（用于 Embedding）",
+    )
     ZHIPU_EMBEDDING_MODEL: str = Field(
         default="embedding-3", description="智谱 Embedding 模型名称"
     )
@@ -77,7 +86,7 @@ class Settings(BaseSettings):
 
     # ---- Memory 配置 ----
     ENABLE_LONG_TERM_MEMORY: bool = Field(
-        default=False, description="是否启用长期记忆（需智谱 API Key）"
+        default=False, description="是否启用长期记忆（需配置 ANTHROPIC_AUTH_TOKEN）"
     )
 
     # ---- Agent 配置 ----

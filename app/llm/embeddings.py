@@ -52,15 +52,15 @@ class ZhipuEmbeddingProvider(BaseEmbeddingProvider):
     智谱 Embedding Provider。
 
     通过 OpenAI Compatible API 接入智谱 embedding-3 模型，
-    复用 ZHIPU_API_KEY 与 ZHIPU_BASE_URL。
+    复用 ANTHROPIC_AUTH_TOKEN 与 ZHIPU_OPENAI_BASE_URL。
     """
 
     def __init__(self, settings: Settings):
         self._settings = settings
         self._client = OpenAIEmbeddings(
             model=settings.ZHIPU_EMBEDDING_MODEL,
-            api_key=settings.ZHIPU_API_KEY,
-            base_url=settings.ZHIPU_BASE_URL,
+            api_key=settings.ANTHROPIC_AUTH_TOKEN,
+            base_url=settings.ZHIPU_OPENAI_BASE_URL,
             check_embedding_ctx_length=False,
         )
 

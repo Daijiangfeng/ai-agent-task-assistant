@@ -15,8 +15,9 @@ from app.tools.registry import ToolRegistry
 def test_settings() -> Settings:
     """创建测试用配置实例。"""
     return Settings(
-        ZHIPU_API_KEY="test_key",
-        ZHIPU_BASE_URL="https://open.bigmodel.cn/api/paas/v4/",
+        ANTHROPIC_AUTH_TOKEN="test_key",
+        ANTHROPIC_BASE_URL="https://open.bigmodel.cn/api/anthropic",
+        ZHIPU_OPENAI_BASE_URL="https://open.bigmodel.cn/api/paas/v4/",
         ZHIPU_MODEL="glm-4-plus",
         DEBUG=True,
         MAX_REPLAN_ITERATIONS=2,
