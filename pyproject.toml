@@ -1,0 +1,27 @@
+[project]
+name = "ai-agent-task-assistant"
+version = "0.1.0"
+description = "企业级 AI Agent 任务执行助手，具备自主规划、工具调用、知识增强和自我反思能力"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests that require external services",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+# 项目统一采用 "Exception" 后缀的异常命名约定（AppException 及其子类），
+# 因此关闭 N818（要求异常以 "Error" 结尾）。
+ignore = ["N818"]

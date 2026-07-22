@@ -1,0 +1,17 @@
+POST http://localhost:8000/api/v1/tasks/
+Content-Type: application/json
+
+{
+  "goal": "帮我分析最近一周的科技新闻趋势",
+  "context": "关注 AI 领域"
+}
+
+### 定义变量
+@task_id=628ff96e-cfb7-416d-922c-ee9ab72a52b4
+
+### 执行任务
+POST http://localhost:8000/api/v1/tasks/{{task_id}}/execute
+Content-Type: application/json
+
+### 查询任务状态
+GET http://localhost:8000/api/v1/tasks/{{task_id}}
