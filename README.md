@@ -1,6 +1,8 @@
 # AI Agent Task Assistant -- 智能任务执行助手
 
-企业级 LLM Agent 应用系统，具备任务规划、工具调用、知识增强、长期记忆和自我反思能力。
+企业级 LLM Agent 全栈应用系统，具备任务规划、工具调用、知识增强、长期记忆和自我反思能力。
+后端为 Python FastAPI + LangGraph Agent；前端为 React + Vite + TypeScript 单页应用，
+落地 Apple 设计语言，覆盖系统概览、任务控制台、知识库管理与执行监控四大界面。
 
 ## 核心能力
 
@@ -10,6 +12,7 @@
 - **Memory Management** -- 短期记忆 (Redis，降级内存) + 长期记忆 (Chroma 向量库)
 - **RAG Knowledge Retrieval** -- 文档解析 + 智谱 Embedding + Chroma 检索增强生成
 - **Reflection Optimization** -- 执行结果自检与自动重新规划
+- **Web UI** -- Apple 风格前端控制台：任务创建/进度轮询、知识库管理、Agent 执行阶段可视化监控
 
 ## 技术栈
 
@@ -25,14 +28,19 @@
 | Redis | 会话缓存和短期记忆（连接失败自动降级内存） |
 | Chroma | 向量数据库（RAG 检索 + 长期记忆，进程内持久化） |
 | Tavily | 联网 Web 搜索（可选，需 API Key） |
+| React 18 + Vite + TypeScript | 前端单页应用（SPA） |
+| react-router-dom | 前端路由（四大界面 + 路由级懒加载分包） |
+| @tanstack/react-query | 数据请求与任务进度轮询（终态自动停轮询） |
+| CSS 变量令牌 + CSS Modules | Apple 设计系统（零 UI 框架依赖） |
+| Vitest + Testing Library | 前端单元/组件测试 |
 
 ## 架构说明
 
 ### 系统架构
 
 ```
-Frontend/API
-    |
+React SPA (frontend/, Vite + TypeScript)
+    |  REST  /api/v1  (开发期 Vite 代理 /api，生产 CORS 白名单)
     v
 FastAPI Gateway
     |
@@ -64,9 +72,10 @@ LangGraph Workflow
 | RAG | `app/rag/` | RAG：文档加载/分块/向量化/索引/检索 + 服务门面 |
 | Models | `app/models/` | Pydantic 数据模型 |
 | Services | `app/services/` | 业务逻辑层（任务管理、Agent 执行） |
-| API | `app/api/` | FastAPI 路由 + 全局异常处理 |
+| API | `app/api/` | FastAPI 路由（tasks/agent/knowledge/stats/tools）+ 全局异常处理 + CORS |
 | Prompts | `app/prompts/` | Prompt 模板集中管理 |
 | Config | `app/config/` | 配置管理、数据库连接、日志 |
+| Frontend | `frontend/` | React + Vite + TS SPA（Apple 设计语言四大界面） |
 
 ### LangGraph 状态机流程
 
@@ -99,7 +108,9 @@ START --> [Planner] --> [Executor] --> [Reflection]
 [RAG]
   ingest: 文件 --> DocumentLoader(PDF/DOCX/TXT/MD) --> TextSplitter(分块)
           --> 智谱 embedding-3 --> Chroma(collection=rag_documents)
-  search: query --> embed --> Chroma 相似度检索(cosine) --> 相关片段
+  search: query --> embed --> Chroma 向量召回(cosine, RETRIEVAL_TOP_K)
+          --(ENABLE_RERANK=true)--> 智谱 Rerank 精排(阈值过滤) --> Top-K 相关片段
+          --(关闭或 rerank 失败回退)--> 向量序 Top-K 相关片段
           RAGRetrievalTool / POST /knowledge/search 均复用此链路
 ```
 
@@ -171,6 +182,42 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - **API 文档 (ReDoc)**: http://localhost:8000/redoc
 - **健康检查**: http://localhost:8000/health
 
+### 前端应用（Web UI）
+
+前端位于 `frontend/`，使用 Vite + React + TypeScript。开发期通过 Vite 代理将 `/api`
+转发到后端（`http://localhost:8000`），无需处理浏览器 CORS；生产由后端 `CORS_ORIGINS` 白名单放行。
+
+```bash
+# 1. 进入前端目录
+cd frontend
+
+# 2. 安装依赖
+npm install
+
+# 3. 启动开发服务器（默认 http://localhost:5173，自动代理 /api → :8000）
+npm run dev
+
+# 4. 生产构建 / 预览
+npm run build
+npm run preview
+
+# 5. 类型检查与测试
+npm run lint   # tsc --noEmit
+npm run test   # vitest run
+```
+
+> 需先启动后端（`uvicorn main:app`）再启动前端，任务执行链路方可联调。
+> 真实 Agent 执行依赖有效的智谱 API Key；无 Key 时前端会优雅展示 `failed`/空 plan 状态。
+
+**四大界面：**
+
+| 界面 | 路由 | 说明 |
+|------|------|------|
+| 系统概览仪表盘 | `/` | 消费 `GET /stats` + `/tools`：任务状态分布、工具能力、知识库规模、健康/版本 |
+| 任务控制台 | `/tasks`、`/tasks/:id` | 任务列表、创建即执行表单、详情页轮询进度/plan/子任务/反思/结果 |
+| 知识库管理 | `/knowledge` | 路径入库、文件上传、检索验证、已索引文档列表与删除 |
+| Agent 执行监控 | `/monitoring`、`/monitoring/:id` | Planner→Executor→Reflection→Replanner 阶段时间线、迭代/版本、每子任务所用工具 |
+
 ---
 
 ## 示例请求
@@ -225,10 +272,20 @@ curl http://localhost:8000/api/v1/tasks/{task_id}
   "status": "executing",
   "current_step": "执行子任务 2/3: 搜索 AI 领域新闻",
   "progress": 33.3,
-  "plan": null,
+  "plan": { "goal": "...", "subtasks": [], "version": 1, "reasoning": "..." },
+  "subtasks": [
+    {"id": "...", "description": "...", "status": "completed", "result": "...", "tool_used": "web_search", "error": null, "dependencies": []}
+  ],
+  "reflection": null,
+  "iteration_count": 0,
+  "plan_version": 1,
+  "error": null,
   "final_result": null
 }
 ```
+
+> `plan`/`subtasks`/`reflection`/`iteration_count`/`plan_version`/`error` 为增强字段：
+> Agent 执行时实时回写真实状态（不再恒为空），供任务详情页与执行监控消费。
 
 ### 列表查询
 
@@ -264,6 +321,46 @@ curl http://localhost:8000/health
 {
   "status": "ok",
   "version": "0.1.0"
+}
+```
+
+### 系统概览统计
+
+供仪表盘一次性获取任务分布、工具数与知识库规模：
+
+```bash
+curl http://localhost:8000/api/v1/stats
+```
+
+**响应：**
+
+```json
+{
+  "version": "0.1.0",
+  "task_total": 3,
+  "tasks_by_status": {"completed": 2, "executing": 1},
+  "tool_count": 5,
+  "knowledge_document_count": 2,
+  "knowledge_chunk_count": 24
+}
+```
+
+### 工具清单
+
+列出已注册到 `ToolRegistry` 的内置工具：
+
+```bash
+curl http://localhost:8000/api/v1/tools
+```
+
+**响应：**
+
+```json
+{
+  "total": 5,
+  "tools": [
+    {"name": "calculator", "description": "执行数学表达式计算"}
+  ]
 }
 ```
 
@@ -304,6 +401,60 @@ curl -X POST http://localhost:8000/api/v1/knowledge/search \
   ]
 }
 ```
+
+### 知识库文件上传
+
+浏览器无法提供服务端路径，改用 multipart 上传（后端写临时文件后复用入库链路）：
+
+```bash
+curl -X POST http://localhost:8000/api/v1/knowledge/upload \
+  -F "file=@docs/handbook.md"
+```
+
+### 已索引文档列表 / 删除
+
+```bash
+# 列出（按来源聚合，含分块数）
+curl http://localhost:8000/api/v1/knowledge/documents
+
+# 删除（source 作为查询参数，避免路径斜杠与路由冲突）
+curl -X DELETE "http://localhost:8000/api/v1/knowledge/documents?source=docs/handbook.md"
+```
+
+---
+
+## 架构改进
+
+### 并行执行
+
+- **并行子任务执行**：Executor 分析子任务的 `depends_on` 依赖关系，无依赖的子任务通过 `asyncio.gather()` 并行执行，显著减少多子任务场景的总时间
+- Planner 生成计划时可包含 `depends_on: list[str]` 字段标注子任务间依赖
+- 无 `depends_on` 字段时退化为原有逐个串行模式（向后兼容）
+
+### 容错与恢复
+
+- **工具调用重试**：对网络超时、连接错误等瞬时失败自动重试最多 2 次（指数退避 1s → 2s），非瞬时错误直接抛出
+- **LangGraph 检查点持久化**：`workflow.build(checkpointer=...)` 支持传入 checkpointer 实例（如 `MemorySaver`、`SqliteSaver`），实现长时间任务的断点恢复
+
+### 安全
+
+- **SQL 沙箱增强**：新增 `sqlparse` 双层检测（语句类型解析 + 关键字白名单），新增 `ALLOW_WRITE_SQL` 配置开关（默认 `false`，管理员可开启写操作）
+- **输入验证增强**：`goal` 最大 10000 字符、`context` 最大 50000 字符、`query` 最大 5000 字符，`top_k` 限制 1–50
+
+### 可观测性
+
+- **Executor 子任务延迟指标**：每个 task_result 自动记录 `latency_ms`，便于分析执行瓶颈
+- **CI 安全扫描**：GitHub Actions 新增 `pip-audit` job 检测依赖漏洞
+
+### 新增配置项
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `ALLOW_WRITE_SQL` | `false` | 启用后允许 SQL 工具执行写操作（INSERT/UPDATE/DELETE），仅管理员应开启 |
+
+### 新增依赖
+
+- `sqlparse>=0.5`（可选，增强 SQL 语句类型检测，未安装时回退纯正则校验）
 
 ---
 
@@ -366,6 +517,23 @@ pytest tests/test_rag.py -v
 | `test_rag.py` | `TestIndexerRetriever` | 索引/检索/删除（mock embedding + 临时 Chroma） |
 | `test_rag.py` | `TestRAGService` | 服务门面 ingest + search |
 
+### 后端一键检查
+
+```bash
+python scripts/check.py   # ruff 代码检查 + pytest（应输出 ALL PASS）
+```
+
+### 前端测试
+
+```bash
+cd frontend
+npm run lint   # tsc --noEmit 类型检查
+npm run test   # vitest run
+```
+
+前端测试覆盖：`apiClient`（basePath/尾斜杠/错误抛出/网络异常）、`StatusPill` 7 态映射、
+`CreateTaskForm` 提交校验、`taskRefetchInterval` 终态停轮询。`ruff`/`pytest` 已在 `pyproject.toml` 中排除 `frontend/`。
+
 ---
 
 ## 项目结构
@@ -383,7 +551,9 @@ ai-agent-task-assistant/
 │   │   ├── v1/
 │   │   │   ├── tasks.py    # 任务 CRUD API
 │   │   │   ├── agent.py    # Agent 执行 API
-│   │   │   └── knowledge.py# 知识库入库/检索 API
+│   │   │   ├── knowledge.py# 知识库入库/上传/检索/列表/删除 API
+│   │   │   ├── stats.py    # 系统概览统计 API
+│   │   │   └── tools.py    # 工具清单 API
 │   │   ├── router.py       # 路由汇总
 │   │   ├── deps.py         # 依赖注入
 │   │   └── errors.py       # 全局异常处理 |
@@ -438,7 +608,19 @@ ai-agent-task-assistant/
 │   ├── test_memory.py      # 记忆系统测试
 │   └── test_rag.py         # RAG 测试
 ├── main.py                 # FastAPI 入口
-├── pyproject.toml           # 项目配置 + pytest 配置
+├── frontend/               # React + Vite + TS 前端 SPA
+│   ├── src/
+│   │   ├── main.tsx        # 入口（Provider 链：Query/Toast/Router/ErrorBoundary）
+│   │   ├── App.tsx         # 路由配置（React.lazy 分包四大界面）
+│   │   ├── lib/            # types / apiClient / queryClient / cx
+│   │   ├── styles/         # tokens.css（Apple 设计令牌）+ globals.css
+│   │   ├── components/     # 原语组件库（Button/StatusPill/Table/...）
+│   │   └── features/       # dashboard / tasks / knowledge / monitoring
+│   ├── index.html
+│   ├── vite.config.ts      # /api 代理 + manualChunks 分包
+│   ├── tsconfig.json
+│   └── package.json
+├── pyproject.toml           # 项目配置 + pytest 配置（exclude frontend）
 ├── requirements.txt        # Python 依赖
 ├── .env.example            # 环境变量模板
 └── README.md               # 项目文档
@@ -452,7 +634,7 @@ ai-agent-task-assistant/
 |--------|--------|------|
 | `ANTHROPIC_AUTH_TOKEN` | (必填) | 智谱 GLM Anthropic 兼容端点 API Key（https://open.bigmodel.cn 申请） |
 | `ANTHROPIC_BASE_URL` | `https://open.bigmodel.cn/api/anthropic` | 智谱 Anthropic 兼容端点地址 |
-| `ZHIPU_MODEL` | `glm-4-plus` | 默认模型 |
+| `ZHIPU_MODEL` | `glm-4.5-air` | 默认模型 |
 | `ZHIPU_OPENAI_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4/` | 智谱 OpenAI 兼容端点（仅用于 Embedding） |
 | `ZHIPU_EMBEDDING_MODEL` | `embedding-3` | 智谱 Embedding 模型 |
 | `TAVILY_API_KEY` | (可选) | Tavily 搜索 API Key，未填则不注册 Web 搜索工具 |
@@ -461,9 +643,15 @@ ai-agent-task-assistant/
 | `RAG_CHUNK_SIZE` | `800` | RAG 分块大小 |
 | `RAG_CHUNK_OVERLAP` | `100` | RAG 分块重叠 |
 | `RAG_TOP_K` | `5` | RAG 检索默认返回数 |
+| `ENABLE_RERANK` | `false` | 是否启用召回后 Rerank 精排（.env 示例默认开启） |
+| `ZHIPU_RERANK_MODEL` | `rerank` | 智谱 Rerank 模型编码 |
+| `RETRIEVAL_TOP_K` | `20` | 向量召回候选数（rerank 前，上限 128） |
+| `RERANK_TOP_K` | `5` | Rerank 精排后保留的结果数 |
+| `RERANK_SCORE_THRESHOLD` | `0.0` | Rerank 相关性分数阈值，低于阈值的片段被过滤 |
 | `SQLITE_SANDBOX_PATH` | `data/sandbox.db` | SQL 工具沙箱库路径（留空用默认） |
 | `ENABLE_LONG_TERM_MEMORY` | `false` | 是否在任务中启用长期记忆召回/写入 |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` | `localhost` / `6379` / `0` | Redis 连接（失败自动降级内存） |
 | `MAX_REPLAN_ITERATIONS` | `3` | 最大重新规划次数 |
 | `MAX_EXECUTION_STEPS` | `10` | 单任务最大执行步骤 |
+| `CORS_ORIGINS` | `["http://localhost:5173", "http://127.0.0.1:5173"]` | 允许跨域的前端来源白名单（配合 allow_credentials） |
 | `DEBUG` | `false` | 调试模式 |

@@ -19,6 +19,8 @@ markers = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# 前端子项目由 Vite/ESLint 独立管理，Python lint 不应扫描。
+extend-exclude = ["frontend"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
