@@ -7,7 +7,7 @@ Content-Type: application/json
 }
 
 ### 定义变量
-@task_id=628ff96e-cfb7-416d-922c-ee9ab72a52b4
+@task_id=8b08133e-707e-4725-ad50-9aa092b80a05
 
 ### 执行任务
 POST http://localhost:8000/api/v1/tasks/{{task_id}}/execute
