@@ -48,9 +48,14 @@ class AgentWorkflow:
         self.reflection = ReflectionNode(llm_provider, prompt_manager)
         self.settings = get_settings()
 
-    def build(self) -> StateGraph:
+    def build(self, checkpointer=None) -> StateGraph:
         """
         构建并编译 LangGraph 状态机。
+
+        Args:
+            checkpointer: 可选的 LangGraph checkpointer 实例，
+                          启用后支持长时间任务的断点恢复（如 MemorySaver、
+                          SqliteSaver 等）。未提供时不启用检查点。
 
         Returns:
             编译后的 StateGraph 实例。
@@ -82,8 +87,13 @@ class AgentWorkflow:
         # 重新规划后回到 Executor
         graph.add_edge("replanner", "executor")
 
+        compile_kwargs = {}
+        if checkpointer is not None:
+            compile_kwargs["checkpointer"] = checkpointer
+            logger.info("AgentWorkflow: 启用检查点持久化 (%s)", type(checkpointer).__name__)
+
         logger.info("AgentWorkflow: 状态机编译完成")
-        return graph.compile()
+        return graph.compile(**compile_kwargs)
 
     def _route_after_reflection(self, state: AgentState) -> str:
         """

@@ -1,6 +1,11 @@
 """
 SQL 查询工具。
 连接 SQLite 沙箱库，仅允许只读 SELECT 查询，首次运行自动初始化示例数据。
+
+安全增强（Section 3.1）：
+- 使用 sqlparse 进行语句类型解析（强于纯正则）
+- ALLOW_WRITE_SQL 配置开关（管理员可开启）
+- 禁止子查询中的写操作
 """
 
 from __future__ import annotations
@@ -31,6 +36,8 @@ _FORBIDDEN_KEYWORDS = {
     "VACUUM",
     "GRANT",
     "REVOKE",
+    "EXEC",
+    "EXECUTE",
 }
 
 # 单次查询最大返回行数
@@ -135,11 +142,14 @@ class SQLQueryTool(BaseTool):
     @staticmethod
     def _validate(sql: str) -> str | None:
         """
-        校验 SQL 安全性。
+        校验 SQL 安全性（双层防护：sqlparse + 关键字验证）。
 
         Returns:
             通过返回 None，否则返回错误消息。
         """
+        settings = get_settings()
+        allow_write = getattr(settings, "allow_write_sql", False)
+
         stripped = sql.strip().rstrip(";").strip()
         if not stripped:
             return "SQL 语句为空"
@@ -148,14 +158,29 @@ class SQLQueryTool(BaseTool):
         if ";" in stripped:
             return "禁止执行多条语句"
 
+        # Layer 1: sqlparse-based statement type detection (if available)
+        try:
+            import sqlparse
+            parsed = sqlparse.parse(stripped)
+            if parsed:
+                stmt = parsed[0]
+                stmt_type = stmt.get_type()
+                if stmt_type and stmt_type.upper() not in ("SELECT", "UNKNOWN", None):
+                    if not allow_write:
+                        return f"仅允许 SELECT 查询（检测到: {stmt_type}）"
+        except ImportError:
+            pass  # sqlparse not installed, fall through to regex check
+
+        # Layer 2: keyword-based validation (always runs as defense-in-depth)
         lowered = stripped.lower()
-        if not (lowered.startswith("select") or lowered.startswith("with")):
-            return "仅允许 SELECT 查询"
+        if not allow_write:
+            if not (lowered.startswith("select") or lowered.startswith("with")):
+                return "仅允许 SELECT 查询"
 
         # 关键字白名单校验（按单词边界匹配）
         tokens = set(re.findall(r"[A-Za-z_]+", stripped.upper()))
         forbidden = tokens & _FORBIDDEN_KEYWORDS
-        if forbidden:
+        if forbidden and not allow_write:
             return f"禁止使用关键字: {', '.join(sorted(forbidden))}"
 
         return None

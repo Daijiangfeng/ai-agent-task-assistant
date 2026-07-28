@@ -57,7 +57,7 @@ class ChromaIndexer(BaseIndexer):
         ids = [c.metadata["chunk_id"] for c in chunks]
         metadatas = [c.metadata for c in chunks]
 
-        embeddings = self._embedding.embed_documents(texts)
+        embeddings = await self._embedding.aembed_documents(texts)
 
         self._store.add(
             collection_name=self._collection,

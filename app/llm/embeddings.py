@@ -5,6 +5,7 @@ Embedding Provider 抽象层。
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 
 from langchain_openai import OpenAIEmbeddings
@@ -46,6 +47,24 @@ class BaseEmbeddingProvider(ABC):
         """
         ...
 
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        """
+        异步批量向量化文档。
+
+        默认实现用 asyncio.to_thread 包装同步方法，避免阻塞事件循环；
+        支持原生异步的实现应覆写本方法。
+        """
+        return await asyncio.to_thread(self.embed_documents, texts)
+
+    async def aembed_query(self, text: str) -> list[float]:
+        """
+        异步向量化单条查询。
+
+        默认实现用 asyncio.to_thread 包装同步方法，避免阻塞事件循环；
+        支持原生异步的实现应覆写本方法。
+        """
+        return await asyncio.to_thread(self.embed_query, text)
+
 
 class ZhipuEmbeddingProvider(BaseEmbeddingProvider):
     """
@@ -57,9 +76,16 @@ class ZhipuEmbeddingProvider(BaseEmbeddingProvider):
 
     def __init__(self, settings: Settings):
         self._settings = settings
+        token = (settings.ANTHROPIC_AUTH_TOKEN or "").strip()
+        if not token:
+            raise ValueError(
+                "ANTHROPIC_AUTH_TOKEN 未配置：智谱 Embedding（OpenAI 兼容端点）"
+                "通过 api_key 走 Authorization: Bearer 鉴权，"
+                "请在 .env 中设置 ANTHROPIC_AUTH_TOKEN。"
+            )
         self._client = OpenAIEmbeddings(
             model=settings.ZHIPU_EMBEDDING_MODEL,
-            api_key=settings.ANTHROPIC_AUTH_TOKEN,
+            api_key=token,
             base_url=settings.ZHIPU_OPENAI_BASE_URL,
             check_embedding_ctx_length=False,
         )
@@ -81,3 +107,21 @@ class ZhipuEmbeddingProvider(BaseEmbeddingProvider):
     def embed_query(self, text: str) -> list[float]:
         """向量化单条查询，失败自动重试。"""
         return self._client.embed_query(text)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        reraise=True,
+    )
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        """原生异步批量向量化文档，失败自动重试，不阻塞事件循环。"""
+        return await self._client.aembed_documents(texts)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        reraise=True,
+    )
+    async def aembed_query(self, text: str) -> list[float]:
+        """原生异步向量化单条查询，失败自动重试，不阻塞事件循环。"""
+        return await self._client.aembed_query(text)

@@ -3,9 +3,10 @@
 提供任务的创建、查询、列表功能。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_task_service
+from app.api.errors import TaskNotFoundException
 from app.models.api_schemas import (
     CreateTaskRequest,
     TaskListResponse,
@@ -65,5 +66,5 @@ async def get_task_status(
     """
     response = await task_service.get_task_status_response(task_id)
     if response is None:
-        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+        raise TaskNotFoundException(task_id)
     return response

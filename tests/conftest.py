@@ -11,6 +11,16 @@ from app.config.settings import Settings
 from app.tools.registry import ToolRegistry
 
 
+@pytest.fixture(autouse=True)
+def disable_rerank(monkeypatch):
+    """
+    测试默认关闭 rerank（环境变量优先级高于 .env），
+    避免直接构造 Settings() 的用例读到 .env 的 ENABLE_RERANK=true 而触发真实网络调用。
+    需要 rerank 的用例请显式传 Settings(ENABLE_RERANK=True) 或注入 mock reranker。
+    """
+    monkeypatch.setenv("ENABLE_RERANK", "false")
+
+
 @pytest.fixture
 def test_settings() -> Settings:
     """创建测试用配置实例。"""
@@ -18,7 +28,8 @@ def test_settings() -> Settings:
         ANTHROPIC_AUTH_TOKEN="test_key",
         ANTHROPIC_BASE_URL="https://open.bigmodel.cn/api/anthropic",
         ZHIPU_OPENAI_BASE_URL="https://open.bigmodel.cn/api/paas/v4/",
-        ZHIPU_MODEL="glm-4-plus",
+        ZHIPU_MODEL="glm-4.5-air",
+        ENABLE_RERANK=False,
         DEBUG=True,
         MAX_REPLAN_ITERATIONS=2,
         MAX_EXECUTION_STEPS=5,

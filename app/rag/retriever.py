@@ -42,7 +42,7 @@ class ChromaRetriever(BaseRetriever):
         Returns:
             Document 列表，metadata 中含 score。
         """
-        query_embedding = self._embedding.embed_query(query)
+        query_embedding = await self._embedding.aembed_query(query)
         results = self._store.query(
             collection_name=self._collection,
             query_embedding=query_embedding,

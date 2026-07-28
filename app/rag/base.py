@@ -36,6 +36,30 @@ class BaseRetriever(ABC):
         ...
 
 
+class BaseReranker(ABC):
+    """
+    重排器抽象基类（可插拔精排层）。
+    对向量召回的候选文档按与查询的相关性重新排序。
+    """
+
+    @abstractmethod
+    async def rerank(
+        self, query: str, documents: list[Document], top_n: int
+    ) -> list[Document]:
+        """
+        对候选文档精排。
+
+        Args:
+            query: 查询文本。
+            documents: 向量召回的候选文档列表。
+            top_n: 精排后保留的文档数。
+
+        Returns:
+            按相关性降序的 Document 列表，metadata 中含 rerank_score。
+        """
+        ...
+
+
 class BaseIndexer(ABC):
     """
     索引器抽象基类。

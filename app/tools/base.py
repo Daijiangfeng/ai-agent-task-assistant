@@ -62,8 +62,14 @@ class BaseTool(ABC):
         """
         from langchain_core.tools import StructuredTool
 
-        async def _arun(query: str) -> str:
-            result = await self.execute(ToolInput(query=query))
+        async def _arun(
+            query: str = "", parameters: Optional[dict[str, Any]] = None
+        ) -> str:
+            # 同时转发自由文本 query 与结构化 parameters，
+            # 使 sql_query / file_processing 等需要结构化入参的工具可正确取参。
+            result = await self.execute(
+                ToolInput(query=query, parameters=parameters or {})
+            )
             if result.success:
                 return str(result.data)
             return f"工具执行失败: {result.error}"

@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 
 from app.config.logging import get_logger
 from app.models.api_schemas import TaskResponse, TaskStatusResponse
-from app.models.task import Task, TaskStatus
+from app.models.plan import Plan, ReflectionResult
+from app.models.task import SubTask, Task, TaskStatus
 
 logger = get_logger(__name__)
 
@@ -123,6 +124,92 @@ class TaskService:
         """获取任务总数。"""
         return len(self._tasks)
 
+    async def count_by_status(self) -> dict[str, int]:
+        """按状态统计任务数量（供仪表盘使用）。"""
+        counts = {status.value: 0 for status in TaskStatus}
+        for task in self._tasks.values():
+            counts[task.status.value] = counts.get(task.status.value, 0) + 1
+        return counts
+
+    async def sync_plan(self, task_id: str, plan: dict) -> None:
+        """
+        将 Planner/Replanner 产出的计划写回任务。
+
+        从 plan dict 重建 Plan / SubTask 模型，同步 task.plan、task.subtasks、plan_version。
+        子任务初始状态为 PENDING。
+        """
+        task = self._tasks.get(task_id)
+        if not task or not plan:
+            return
+        raw_subtasks = plan.get("subtasks", []) or []
+        subtasks: list[SubTask] = []
+        for i, st in enumerate(raw_subtasks):
+            subtasks.append(
+                SubTask(
+                    id=str(st.get("id", f"task_{i}")),
+                    description=str(st.get("description", "")),
+                    status=TaskStatus.PENDING,
+                    dependencies=[str(d) for d in st.get("dependencies", [])],
+                )
+            )
+        version = int(plan.get("version", task.plan_version) or task.plan_version)
+        task.plan = Plan(
+            goal=str(plan.get("goal", task.goal)),
+            subtasks=subtasks,
+            version=version,
+            reasoning=plan.get("reasoning"),
+        )
+        task.subtasks = subtasks
+        task.plan_version = version
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+
+    async def sync_task_results(
+        self, task_id: str, task_results: list[dict]
+    ) -> None:
+        """
+        根据 Executor 累加的 task_results 更新对应子任务的状态/结果/所用工具/错误。
+
+        task_results 每项结构：{subtask_id, description, result, status, error?}，
+        status 为 "completed" / "failed" 字符串。
+        """
+        task = self._tasks.get(task_id)
+        if not task or not task_results:
+            return
+        by_id = {s.id: s for s in task.subtasks}
+        for i, r in enumerate(task_results):
+            sid = str(r.get("subtask_id", f"task_{i}"))
+            subtask = by_id.get(sid)
+            if subtask is None:
+                continue
+            raw_status = str(r.get("status", "")).lower()
+            if raw_status == "completed":
+                subtask.status = TaskStatus.COMPLETED
+            elif raw_status == "failed":
+                subtask.status = TaskStatus.FAILED
+            subtask.result = r.get("result")
+            subtask.tool_used = r.get("tool_used")
+            subtask.error = r.get("error")
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+
+    async def sync_reflection(
+        self,
+        task_id: str,
+        reflection: dict | None,
+        iteration_count: int | None = None,
+    ) -> None:
+        """将反思评估结果与迭代次数写回任务。"""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        if reflection:
+            try:
+                task.reflection = ReflectionResult(**reflection)
+            except Exception:  # pragma: no cover - 防御性，字段缺失时忽略
+                task.reflection = None
+        if iteration_count is not None:
+            task.iteration_count = iteration_count
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+
     async def get_task_status_response(self, task_id: str) -> TaskStatusResponse | None:
         """
         获取任务状态响应（用于 API 返回）。
@@ -156,7 +243,12 @@ class TaskService:
             status=task.status,
             current_step=current_step,
             progress=progress,
-            plan=None,  # 可扩展返回详细计划
+            plan=task.plan,
+            subtasks=task.subtasks,
+            reflection=task.reflection,
+            iteration_count=task.iteration_count,
+            plan_version=task.plan_version,
+            error=task.error,
             final_result=task.final_result,
         )
 
@@ -165,6 +257,6 @@ class TaskService:
         return TaskResponse(
             task_id=task.id,
             status=task.status,
-            plan=None,
+            plan=task.plan,
             created_at=task.created_at,
         )

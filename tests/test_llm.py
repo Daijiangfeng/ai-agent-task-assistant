@@ -72,7 +72,42 @@ class TestZhipuProvider:
         assert model is not None
 
     def test_get_client(self, test_settings: Settings):
-        """测试获取 OpenAI SDK Client。"""
+        """测试获取同步 SDK Client。"""
         provider = ZhipuProvider(test_settings)
         client = provider.get_client()
         assert client is not None
+
+    def test_get_async_client(self, test_settings: Settings):
+        """测试获取异步 AsyncAnthropic Client。"""
+        from anthropic import AsyncAnthropic
+
+        provider = ZhipuProvider(test_settings)
+        client = provider.get_async_client()
+        assert isinstance(client, AsyncAnthropic)
+
+    def test_base_provider_async_client_default_raises(self, test_settings: Settings):
+        """未覆写 get_async_client 的 Provider 默认抛 NotImplementedError。"""
+
+        class SyncOnlyProvider(BaseLLMProvider):
+            def get_chat_model(self, **kwargs):
+                return None
+
+            def get_client(self):
+                return None
+
+        provider = SyncOnlyProvider()
+        with pytest.raises(NotImplementedError):
+            provider.get_async_client()
+
+
+class TestAsyncEmbedding:
+    """异步 Embedding 接口测试。"""
+
+    @pytest.mark.asyncio
+    async def test_aembed_default_fallback(self, mock_embedding_provider):
+        """BaseEmbeddingProvider 默认 aembed_* 通过 to_thread 包装同步实现，结果一致。"""
+        docs = await mock_embedding_provider.aembed_documents(["a", "b"])
+        assert docs == mock_embedding_provider.embed_documents(["a", "b"])
+
+        query = await mock_embedding_provider.aembed_query("hello")
+        assert query == mock_embedding_provider.embed_query("hello")

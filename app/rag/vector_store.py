@@ -132,3 +132,61 @@ class ChromaStore:
         """
         collection = self.get_or_create_collection(collection_name)
         collection.delete(ids=ids)
+
+    def count(self, collection_name: str) -> int:
+        """返回 collection 中的向量记录（chunk）总数。"""
+        collection = self.get_or_create_collection(collection_name)
+        return collection.count()
+
+    def list_records(
+        self,
+        collection_name: str,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """
+        列出 collection 中的记录（不做向量检索，仅枚举元数据）。
+
+        Args:
+            collection_name: collection 名称。
+            limit: 可选，返回数量上限。
+            offset: 偏移量。
+
+        Returns:
+            记录列表，每项含 id、document、metadata。
+        """
+        collection = self.get_or_create_collection(collection_name)
+        if collection.count() == 0:
+            return []
+        kwargs: dict[str, Any] = {"include": ["documents", "metadatas"]}
+        if limit is not None:
+            kwargs["limit"] = limit
+            kwargs["offset"] = offset
+        result = collection.get(**kwargs)
+        ids = result.get("ids", []) or []
+        documents = result.get("documents", []) or []
+        metadatas = result.get("metadatas", []) or []
+        items: list[dict[str, Any]] = []
+        for i, doc_id in enumerate(ids):
+            items.append(
+                {
+                    "id": doc_id,
+                    "document": documents[i] if i < len(documents) else "",
+                    "metadata": metadatas[i] if i < len(metadatas) else {},
+                }
+            )
+        return items
+
+    def delete_by_source(self, collection_name: str, source: str) -> int:
+        """
+        按来源（metadata.source）删除一个文档的所有 chunk。
+
+        Returns:
+            被删除的 chunk 数量。
+        """
+        collection = self.get_or_create_collection(collection_name)
+        existing = collection.get(where={"source": source})
+        ids = existing.get("ids", []) or []
+        if ids:
+            collection.delete(ids=ids)
+        return len(ids)

@@ -25,6 +25,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_logging(debug=settings.DEBUG)
     logger.info("应用启动中...", app_name=settings.APP_NAME)
+    # 输出当前生效模型，方便排查配置问题
+    logger.info(f"Current LLM Model: {settings.ZHIPU_MODEL}")
 
     # 初始化 Prompt 管理器
     PromptManager.init_defaults()
@@ -74,9 +76,11 @@ def create_app() -> FastAPI:
     app.add_middleware(ErrorHandlerMiddleware)
 
     # CORS 中间件
+    # 注意：allow_credentials=True 时 allow_origins 不能为 "*"（Fetch 规范禁止），
+    # 否则浏览器会拒绝带凭证的跨域请求。此处使用显式来源白名单。
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

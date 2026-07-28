@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import structlog
+
 from app.agent.state import AgentState
 from app.agent.workflow import AgentWorkflow
 from app.config.logging import get_logger
@@ -107,6 +109,18 @@ class AgentService:
         Returns:
             最终结果文本，失败返回 None。
         """
+        # 绑定 task_id 到日志上下文，下游节点日志经 merge_contextvars 自动携带，
+        # with 退出（含异常路径）时自动清理，避免跨任务残留。
+        with structlog.contextvars.bound_contextvars(task_id=task_id):
+            return await self._run_task_inner(task_id, goal, context)
+
+    async def _run_task_inner(
+        self,
+        task_id: str,
+        goal: str,
+        context: str | None = None,
+    ) -> str | None:
+        """run_task 的实际执行体，在已绑定 task_id 的日志上下文内运行。"""
         logger.info("AgentService: 开始执行任务", task_id=task_id, goal=goal)
 
         # 更新任务状态为规划中
@@ -157,13 +171,26 @@ class AgentService:
                         await self.task_service.update_task_status(
                             task_id, TaskStatus.EXECUTING
                         )
+                        if node_output.get("plan"):
+                            await self.task_service.sync_plan(
+                                task_id, node_output["plan"]
+                            )
                     elif node_name == "executor":
                         await self.task_service.update_task_status(
                             task_id, TaskStatus.EXECUTING
                         )
+                        if node_output.get("task_results"):
+                            await self.task_service.sync_task_results(
+                                task_id, node_output["task_results"]
+                            )
                     elif node_name == "reflection":
                         await self.task_service.update_task_status(
                             task_id, TaskStatus.REFLECTING
+                        )
+                        await self.task_service.sync_reflection(
+                            task_id,
+                            node_output.get("reflection_result"),
+                            node_output.get("iteration_count"),
                         )
                         if node_output.get("should_replan"):
                             await self.task_service.update_task_status(
@@ -173,6 +200,14 @@ class AgentService:
                         await self.task_service.update_task_status(
                             task_id, TaskStatus.EXECUTING
                         )
+                        if node_output.get("plan"):
+                            await self.task_service.sync_plan(
+                                task_id, node_output["plan"]
+                            )
+                        if node_output.get("iteration_count") is not None:
+                            await self.task_service.sync_reflection(
+                                task_id, None, node_output["iteration_count"]
+                            )
 
                     # 检查是否有最终结果
                     if node_output.get("final_result"):

@@ -52,7 +52,7 @@ class VectorLongTermMemory(BaseMemory):
             ttl: 长期记忆忽略 ttl 参数。
         """
         text = value if isinstance(value, str) else str(value)
-        embedding = self._embedding.embed_query(text)
+        embedding = await self._embedding.aembed_query(text)
         # 先删除同 ID 旧记录，避免 Chroma add 重复 ID 报错
         self._store.delete(self._collection, [key])
         self._store.add(
@@ -95,7 +95,7 @@ class VectorLongTermMemory(BaseMemory):
         Returns:
             记忆列表，每项含 key、value、score。
         """
-        embedding = self._embedding.embed_query(query)
+        embedding = await self._embedding.aembed_query(query)
         results = self._store.query(
             collection_name=self._collection,
             query_embedding=embedding,

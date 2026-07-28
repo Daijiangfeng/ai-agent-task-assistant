@@ -4,9 +4,10 @@ Agent 执行相关 API 路由。
 """
 
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from app.api.deps import get_agent_service, get_task_service
+from app.api.errors import TaskNotFoundException, TaskStateException
 from app.models.api_schemas import TaskResponse
 from app.models.task import TaskStatus
 from app.services.agent_service import AgentService
@@ -29,13 +30,13 @@ async def execute_task(
     """
     task = await task_service.get_task(task_id)
     if task is None:
-        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+        raise TaskNotFoundException(task_id)
 
     if task.status not in (TaskStatus.PENDING, TaskStatus.FAILED):
-        raise HTTPException(
-            status_code=400,
-            detail=f"任务当前状态为 {task.status.value}，无法执行。"
-            f"仅 PENDING 或 FAILED 状态的任务可以执行。",
+        raise TaskStateException(
+            task_id=task_id,
+            current_status=task.status.value,
+            allowed_statuses=[TaskStatus.PENDING.value, TaskStatus.FAILED.value],
         )
 
     # 在后台异步执行 Agent Workflow

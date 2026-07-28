@@ -5,6 +5,7 @@ Executor Agent 节点。
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterable
 from typing import Any, Optional
 
@@ -100,7 +101,11 @@ class ExecutorNode:
 
     async def run(self, state: AgentState) -> dict[str, Any]:
         """
-        执行当前子任务。
+        执行当前子任务（支持并行执行无依赖的子任务）。
+
+        如果计划中的子任务包含 depends_on 字段，将按依赖拓扑分层执行：
+        同层内的子任务并行执行，跨层串行执行。若无 depends_on 字段，
+        退化为原有的逐个串行执行模式。
 
         Args:
             state: 当前 Agent 状态。
@@ -125,6 +130,14 @@ class ExecutorNode:
                 "errors": [],
             }
 
+        # Check if this is a parallelizable batch
+        parallel_batch = self._get_parallel_batch(subtasks, idx, state)
+
+        if len(parallel_batch) > 1:
+            # Parallel execution of independent subtasks
+            return await self._run_parallel_batch(state, subtasks, parallel_batch)
+
+        # Single task execution (original path)
         subtask = subtasks[idx]
         logger.info(
             "Executor: 执行子任务",
@@ -138,6 +151,7 @@ class ExecutorNode:
 
         # 获取可用工具
         tools = ToolRegistry.get_all_langchain_tools()
+        t0 = time.perf_counter()
 
         try:
             # 构造执行消息
@@ -165,17 +179,20 @@ class ExecutorNode:
                 result_content = response.content
 
             # 构造任务结果
+            exec_ms = (time.perf_counter() - t0) * 1000
             task_result = {
                 "subtask_id": subtask.get("id", f"task_{idx}"),
                 "description": subtask["description"],
                 "result": result_content,
                 "status": "completed",
+                "latency_ms": round(exec_ms, 1),
             }
 
             logger.info(
                 "Executor: 子任务完成",
                 index=idx,
                 task_id=task_result["subtask_id"],
+                latency_ms=round(exec_ms, 1),
             )
 
             return {
@@ -246,7 +263,9 @@ class ExecutorNode:
                 continue
 
             try:
-                tool_result = await tool_map[tool_name].ainvoke(tool_args)
+                tool_result = await self._invoke_with_retry(
+                    tool_map[tool_name], tool_args
+                )
                 all_messages.append(
                     ToolMessage(content=str(tool_result), tool_call_id=tool_call["id"])
                 )
@@ -262,6 +281,41 @@ class ExecutorNode:
         final_response = await llm_with_tools.ainvoke(all_messages)
         return final_response.content
 
+    async def _invoke_with_retry(
+        self, tool, tool_args: dict[str, Any], max_retries: int = 2
+    ) -> Any:
+        """调用工具并对瞬时错误进行有限重试。
+
+        对网络超时、连接错误等瞬时性异常自动重试最多 max_retries 次，
+        使用指数退避（1s, 2s）。非瞬时错误（如参数错误）直接抛出。
+        """
+        import asyncio
+
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                return await tool.ainvoke(tool_args)
+            except Exception as e:
+                error_str = str(e).lower()
+                # 判断是否为可重试的瞬时错误
+                is_transient = any(
+                    keyword in error_str
+                    for keyword in ("timeout", "connection", "temporary", "unavailable", "429")
+                )
+                if not is_transient or attempt >= max_retries:
+                    raise
+                last_exc = e
+                delay = 1.0 * (2 ** attempt)
+                logger.warning(
+                    "Executor: 工具调用瞬时失败，%0.1fs后重试",
+                    delay,
+                    tool=tool.name if hasattr(tool, 'name') else '?',
+                    attempt=attempt + 1,
+                    error=str(e),
+                )
+                await asyncio.sleep(delay)
+        raise last_exc  # type: ignore[misc]
+
     def _build_previous_context(self, task_results: list[dict]) -> str:
         """构建之前任务结果的上下文文本。"""
         if not task_results:
@@ -276,3 +330,113 @@ class ExecutorNode:
                 f"{r.get('description', '')} -> {result}"
             )
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Parallel execution support (Section 1.4 / 2.1)
+    # ------------------------------------------------------------------
+
+    def _get_parallel_batch(
+        self, subtasks: list[dict], current_idx: int, state: AgentState
+    ) -> list[int]:
+        """识别从 current_idx 开始的可并行执行批次。
+
+        如果子任务不包含 depends_on 字段，返回单个索引。
+        如果包含，找出从 current_idx 开始所有已满足依赖的子任务。
+        """
+        completed_ids = {
+            r.get("subtask_id")
+            for r in state.get("task_results", [])
+            if r.get("status") == "completed"
+        }
+
+        # If no subtask has depends_on, fall back to serial mode
+        has_deps = any("depends_on" in t for t in subtasks)
+        if not has_deps:
+            return [current_idx]
+
+        # Find all subtasks that are ready to execute (dependencies met)
+        batch = []
+        for i in range(current_idx, len(subtasks)):
+            task = subtasks[i]
+            task_id = task.get("id", f"task_{i}")
+            if task_id in completed_ids:
+                continue
+            deps = task.get("depends_on", [])
+            if all(d in completed_ids for d in deps):
+                batch.append(i)
+
+        return batch if batch else [current_idx]
+
+    async def _run_parallel_batch(
+        self, state: AgentState, subtasks: list[dict], batch_indices: list[int]
+    ) -> dict[str, Any]:
+        """并行执行一批无依赖的子任务。"""
+        import asyncio
+
+        logger.info(
+            "Executor: 并行执行 %d 个无依赖子任务",
+            len(batch_indices),
+            task_ids=[subtasks[i].get("id", f"task_{i}") for i in batch_indices],
+        )
+
+        async def _exec_one(task_idx: int) -> dict[str, Any]:
+            subtask = subtasks[task_idx]
+            previous_results = self._build_previous_context(state["task_results"])
+            tools = ToolRegistry.get_all_langchain_tools()
+            t0 = time.perf_counter()
+
+            try:
+                prompt = self.prompt_manager.get_executor_prompt()
+                messages = prompt.format_messages(
+                    previous_results=previous_results or "无",
+                    subtask_description=subtask["description"],
+                )
+                if tools:
+                    llm_with_tools = self.llm.bind_tools(tools)
+                    response = await llm_with_tools.ainvoke(messages)
+                    if response.tool_calls:
+                        result_content = await self._execute_tool_calls(
+                            response, tools, messages, llm_with_tools
+                        )
+                    else:
+                        result_content = response.content
+                else:
+                    response = await self.llm.ainvoke(messages)
+                    result_content = response.content
+
+                exec_ms = (time.perf_counter() - t0) * 1000
+                return {
+                    "subtask_id": subtask.get("id", f"task_{task_idx}"),
+                    "description": subtask["description"],
+                    "result": result_content,
+                    "status": "completed",
+                    "latency_ms": round(exec_ms, 1),
+                }
+            except Exception as e:
+                exec_ms = (time.perf_counter() - t0) * 1000
+                return {
+                    "subtask_id": subtask.get("id", f"task_{task_idx}"),
+                    "description": subtask["description"],
+                    "result": f"执行失败: {str(e)}",
+                    "status": "failed",
+                    "latency_ms": round(exec_ms, 1),
+                }
+
+        # Execute all tasks in the batch concurrently
+        results = await asyncio.gather(*[_exec_one(i) for i in batch_indices])
+
+        # Advance index past all completed batch tasks
+        new_idx = max(batch_indices) + 1
+
+        logger.info(
+            "Executor: 并行批次完成",
+            count=len(results),
+            next_idx=new_idx,
+        )
+
+        return {
+            "task_results": list(results),
+            "current_task_index": new_idx,
+            "messages": [AIMessage(content=f"Parallel batch completed: {len(results)} subtasks")],
+            "errors": [],
+        }

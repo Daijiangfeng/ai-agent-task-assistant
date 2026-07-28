@@ -118,22 +118,26 @@ class ReflectionNode:
         except Exception as e:
             logger.error("Reflection: 评估失败", error=str(e))
 
-            # 评估失败时，默认通过并合成结果
+            # 评估失败：不再默认判为满意（避免"失败伪装成功"）。
+            # 标记为降级——无法评估质量，记录 issue；仍合成已有结果并终止，
+            # should_replan=False 防止在评估器不可用时陷入重规划死循环。
             final_result = self._synthesize_results(task_results, state["goal"])
 
             return {
                 "reflection_result": {
-                    "is_satisfactory": True,
-                    "accuracy_score": 0.5,
-                    "completeness_score": 0.5,
-                    "relevance_score": 0.5,
-                    "issues": [f"Reflection evaluation failed: {str(e)}"],
+                    "is_satisfactory": False,
+                    "accuracy_score": 0.0,
+                    "completeness_score": 0.0,
+                    "relevance_score": 0.0,
+                    "issues": [
+                        f"反思评估不可用，结果质量未经校验（降级）: {str(e)}"
+                    ],
                     "suggestion": None,
                 },
                 "should_replan": False,
                 "final_result": final_result,
                 "messages": [],
-                "errors": [f"Reflection failed: {str(e)}"],
+                "errors": [f"Reflection failed (degraded): {str(e)}"],
             }
 
     def _synthesize_results(self, task_results: list[dict], goal: str) -> str:

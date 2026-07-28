@@ -7,10 +7,14 @@ from fastapi import APIRouter
 
 from app.api.v1.agent import router as agent_router
 from app.api.v1.knowledge import router as knowledge_router
+from app.api.v1.stats import router as stats_router
 from app.api.v1.tasks import router as tasks_router
+from app.api.v1.tools import router as tools_router
 
 api_router = APIRouter(prefix="/api/v1")
 
 api_router.include_router(tasks_router)
 api_router.include_router(agent_router)
 api_router.include_router(knowledge_router)
+api_router.include_router(tools_router)
+api_router.include_router(stats_router)
