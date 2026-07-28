@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
 
+    # ---- CORS ----
+    CORS_ORIGINS: list[str] = Field(
+        default=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
+        description="允许跨域访问的前端来源白名单（配合 allow_credentials 使用）",
+    )
+
     # ---- 智谱 LLM 配置（Anthropic 兼容端点） ----
     ANTHROPIC_AUTH_TOKEN: str = Field(
         default="",
@@ -30,7 +39,7 @@ class Settings(BaseSettings):
         default="https://open.bigmodel.cn/api/anthropic",
         description="智谱 Anthropic Compatible API 基础地址",
     )
-    ZHIPU_MODEL: str = Field(default="glm-4-plus", description="默认模型名称")
+    ZHIPU_MODEL: str = Field(default="glm-4.5-air", description="默认模型名称")
     ZHIPU_TEMPERATURE: float = Field(default=0.7, ge=0.0, le=2.0)
     ZHIPU_MAX_TOKENS: int = Field(default=4096, ge=1)
 
@@ -78,6 +87,23 @@ class Settings(BaseSettings):
     RAG_CHUNK_SIZE: int = Field(default=800, ge=100)
     RAG_CHUNK_OVERLAP: int = Field(default=100, ge=0)
     RAG_TOP_K: int = Field(default=5, ge=1, le=50)
+
+    # ---- RAG Rerank 精排配置（智谱 rerank 模型） ----
+    ENABLE_RERANK: bool = Field(
+        default=False, description="是否启用召回后 rerank 精排（需 ANTHROPIC_AUTH_TOKEN）"
+    )
+    ZHIPU_RERANK_MODEL: str = Field(
+        default="rerank", description="智谱 Rerank 模型编码"
+    )
+    RETRIEVAL_TOP_K: int = Field(
+        default=20, ge=1, le=128, description="向量召回候选数（rerank 前，API 上限 128）"
+    )
+    RERANK_TOP_K: int = Field(
+        default=5, ge=1, description="rerank 精排后保留的结果数"
+    )
+    RERANK_SCORE_THRESHOLD: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="rerank 相关性分数阈值，低于阈值的片段被过滤"
+    )
 
     # ---- SQLite 沙箱（SQL Query 工具） ----
     SQLITE_SANDBOX_PATH: str = Field(
