@@ -65,11 +65,11 @@ LangGraph Workflow
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
-| Agent | `app/agent/` | LangGraph 状态机、Planner/Executor/Reflection 节点 |
-| LLM | `app/llm/` | LLM Provider 抽象层，智谱 GLM 接入 |
+| Agent | `app/agent/` | LangGraph 状态机、Planner/Executor/Reflection 节点与 workflow 构建 |
+| LLM | `app/llm/` | LLM Provider 抽象层、智谱 GLM 接入、Embedding 工厂 |
 | Tools | `app/tools/` | 工具调用框架（抽象基类 + 注册表 + 内置工具） |
 | Memory | `app/memory/` | 记忆系统：Redis 短期记忆（内存降级）+ Chroma 长期记忆 + 工厂 |
-| RAG | `app/rag/` | RAG：文档加载/分块/向量化/索引/检索 + 服务门面 |
+| RAG | `app/rag/` | RAG：文档加载/分块/向量化/索引/检索/重排 + 服务门面 |
 | Models | `app/models/` | Pydantic 数据模型 |
 | Services | `app/services/` | 业务逻辑层（任务管理、Agent 执行） |
 | API | `app/api/` | FastAPI 路由（tasks/agent/knowledge/stats/tools）+ 全局异常处理 + CORS |
@@ -438,7 +438,8 @@ curl -X DELETE "http://localhost:8000/api/v1/knowledge/documents?source=docs/han
 
 ### 安全
 
-- **SQL 沙箱增强**：新增 `sqlparse` 双层检测（语句类型解析 + 关键字白名单），新增 `ALLOW_WRITE_SQL` 配置开关（默认 `false`，管理员可开启写操作）
+- **SQL 沙箱增强**：`sqlparse` 双层检测（语句类型解析 + 关键字白名单），仅允许 SELECT/WITH 只读单语句
+- **工具执行边界**：Executor 内置 `ToolExecutionPolicy`——仅允许已注册工具被调用；`sql_query`/`file_processing`/`web_search` 等副作用工具执行前经过可拒绝的审批钩子
 - **输入验证增强**：`goal` 最大 10000 字符、`context` 最大 50000 字符、`query` 最大 5000 字符，`top_k` 限制 1–50
 
 ### 可观测性
@@ -446,15 +447,9 @@ curl -X DELETE "http://localhost:8000/api/v1/knowledge/documents?source=docs/han
 - **Executor 子任务延迟指标**：每个 task_result 自动记录 `latency_ms`，便于分析执行瓶颈
 - **CI 安全扫描**：GitHub Actions 新增 `pip-audit` job 检测依赖漏洞
 
-### 新增配置项
+### 可选依赖
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `ALLOW_WRITE_SQL` | `false` | 启用后允许 SQL 工具执行写操作（INSERT/UPDATE/DELETE），仅管理员应开启 |
-
-### 新增依赖
-
-- `sqlparse>=0.5`（可选，增强 SQL 语句类型检测，未安装时回退纯正则校验）
+- `sqlparse`（可选，未列入 `requirements.txt`；安装后增强 SQL 语句类型检测，未安装时自动回退纯正则校验）
 
 ---
 
@@ -473,6 +468,8 @@ pytest tests/test_agent.py -v
 pytest tests/test_tools.py -v
 pytest tests/test_memory.py -v
 pytest tests/test_rag.py -v
+pytest tests/test_integration.py -v
+pytest tests/test_new_endpoints.py -v
 ```
 
 > 测试全部离线可跑：智谱 embedding 用 mock provider，Chroma 用临时目录，Redis/Tavily 无需真实服务。
@@ -516,6 +513,9 @@ pytest tests/test_rag.py -v
 | `test_rag.py` | `TestTextSplitter` | 分块生成与 chunk_id 唯一性 |
 | `test_rag.py` | `TestIndexerRetriever` | 索引/检索/删除（mock embedding + 临时 Chroma） |
 | `test_rag.py` | `TestRAGService` | 服务门面 ingest + search |
+| `test_integration.py` | `TestAgentIntegration` | Agent 端到端集成：FakeChatModel 驱动 Planner→Executor→Reflection 全流程 + 真实工具链（web_search/sql_query/file_processing/rag_retrieval mock 外部依赖）+ 长期记忆回写 |
+| `test_new_endpoints.py` | `TestStatsAndToolsAPI` | `/stats` 与 `/tools` 只读接口 |
+| `test_new_endpoints.py` | `TestTaskStateWriteback` | Agent 执行中任务状态实时回写逻辑 |
 
 ### 后端一键检查
 
@@ -543,32 +543,32 @@ ai-agent-task-assistant/
 ├── app/
 │   ├── agent/              # Agent Workflow (LangGraph 状态机)
 │   │   ├── state.py        # 全局状态定义
-│   │   ├── planner_node.py # Planner 节点
-│   │   ├── executor_node.py# Executor 节点
+│   │   ├── planner_node.py # Planner 节点（含 replan 重规划）
+│   │   ├── executor_node.py# Executor 节点（依赖分层并行 + 重试 + 执行边界）
 │   │   ├── reflection_node.py # Reflection 节点
-│   │   └── workflow.py     # 状态机构建
+│   │   └── workflow.py     # 状态机构建（可选 checkpointer）
 │   ├── api/                # FastAPI 路由
 │   │   ├── v1/
-│   │   │   ├── tasks.py    # 任务 CRUD API
-│   │   │   ├── agent.py    # Agent 执行 API
+│   │   │   ├── tasks.py    # 任务创建/列表/状态查询 API
+│   │   │   ├── agent.py    # 任务执行 API（POST /tasks/{id}/execute）
 │   │   │   ├── knowledge.py# 知识库入库/上传/检索/列表/删除 API
 │   │   │   ├── stats.py    # 系统概览统计 API
 │   │   │   └── tools.py    # 工具清单 API
-│   │   ├── router.py       # 路由汇总
+│   │   ├── router.py       # 路由汇总（前缀 /api/v1）
 │   │   ├── deps.py         # 依赖注入
-│   │   └── errors.py       # 全局异常处理 |
+│   │   └── errors.py       # 全局异常处理（AppException + 中间件）
 │   ├── config/             # 配置管理
-│   │   ├── settings.py     # Pydantic Settings
-│   │   ├── database.py     # 数据库连接
-│   │   └── logging.py      # 日志配置
+│   │   ├── settings.py     # Pydantic Settings（.env / 环境变量覆盖）
+│   │   ├── database.py     # 数据库连接（PostgreSQL 预留）
+│   │   └── logging.py      # structlog 日志配置
 │   ├── llm/                # LLM Provider
 │   │   ├── base.py         # 抽象基类
-│   │   ├── zhipu_provider.py # 智谱实现
+│   │   ├── zhipu_provider.py # 智谱实现（Anthropic 兼容端点）
 │   │   ├── embeddings.py   # Embedding 抽象层 + 智谱 embedding-3
 │   │   └── factory.py      # 工厂模式（LLM + Embedding）
 │   ├── models/             # 数据模型
-│   │   ├── task.py         # 任务模型
-│   │   ├── plan.py         # 计划模型
+│   │   ├── task.py         # 任务模型（Task / SubTask / TaskStatus）
+│   │   ├── plan.py         # 计划模型（Plan / ReflectionResult）
 │   │   └── api_schemas.py  # API Schema
 │   ├── prompts/            # Prompt 模板
 │   │   ├── manager.py      # Prompt 管理器
@@ -576,9 +576,9 @@ ai-agent-task-assistant/
 │   │   ├── executor.py     # Executor Prompt
 │   │   └── reflection.py   # Reflection Prompt
 │   ├── tools/              # 工具框架
-│   │   ├── base.py         # 工具抽象基类
-│   │   ├── registry.py     # 工具注册表
-│   │   ├── builtins.py     # 内置工具 + 注册入口
+│   │   ├── base.py         # 工具抽象基类（BaseTool / ToolInput / ToolOutput）
+│   │   ├── registry.py     # 工具注册表（类级单例）
+│   │   ├── builtins.py     # 内置工具（datetime/calculator）+ 注册入口
 │   │   ├── web_search.py   # Tavily Web 搜索
 │   │   ├── sql_query.py    # SQLite 沙箱只读查询
 │   │   ├── file_processing.py # 本地文件解析
@@ -595,19 +595,11 @@ ai-agent-task-assistant/
 │   │   ├── vector_store.py # Chroma 封装
 │   │   ├── indexer.py      # 索引器
 │   │   ├── retriever.py    # 检索器
+│   │   ├── reranker.py     # 智谱 Rerank 精排（ENABLE_RERANK 开启时生效）
 │   │   └── service.py      # RAG 服务门面
 │   └── services/           # 业务服务层
-│       ├── task_service.py # 任务管理
+│       ├── task_service.py # 任务管理（内存存储）
 │       └── agent_service.py# Agent 执行（含长期记忆接入）
-├── tests/                  # 测试
-│   ├── conftest.py         # Fixtures + mock（含 mock embedding / 临时 Chroma）
-│   ├── test_llm.py         # LLM 测试
-│   ├── test_agent.py       # Agent 测试
-│   ├── test_api.py         # API 测试
-│   ├── test_tools.py       # 工具测试
-│   ├── test_memory.py      # 记忆系统测试
-│   └── test_rag.py         # RAG 测试
-├── main.py                 # FastAPI 入口
 ├── frontend/               # React + Vite + TS 前端 SPA
 │   ├── src/
 │   │   ├── main.tsx        # 入口（Provider 链：Query/Toast/Router/ErrorBoundary）
@@ -618,11 +610,32 @@ ai-agent-task-assistant/
 │   │   └── features/       # dashboard / tasks / knowledge / monitoring
 │   ├── index.html
 │   ├── vite.config.ts      # /api 代理 + manualChunks 分包
+│   ├── vitest.setup.ts     # 前端测试环境初始化
 │   ├── tsconfig.json
 │   └── package.json
-├── pyproject.toml           # 项目配置 + pytest 配置（exclude frontend）
+├── tests/                  # 后端测试（全部离线可跑）
+│   ├── conftest.py         # Fixtures + mock（含 mock embedding / 临时 Chroma）
+│   ├── test_llm.py         # LLM 测试
+│   ├── test_agent.py       # Agent 测试
+│   ├── test_api.py         # API 测试
+│   ├── test_tools.py       # 工具测试
+│   ├── test_memory.py      # 记忆系统测试
+│   ├── test_rag.py         # RAG 测试
+│   ├── test_integration.py # Agent 端到端集成测试（FakeChatModel + 真实工具链）
+│   └── test_new_endpoints.py # stats/tools 接口 + 任务状态回写测试
+├── scripts/                # 辅助脚本
+│   ├── check.py            # 一键质量门禁（ruff + pytest，CI 同款）
+│   └── zhipu_selftest.py   # 智谱 API 联调自测（Chat/Embedding/Rerank/工具）
+├── .github/workflows/
+│   └── ci.yml              # CI：quality-gate（ruff+pytest）+ security（pip-audit）
+├── data/                   # 运行期产物（Chroma 向量库 / SQL 沙箱，不提交）
+├── docs/                   # 技术文档（docx）
+├── main.py                 # FastAPI 入口（应用工厂 + lifespan 初始化）
+├── pyproject.toml          # 项目配置 + ruff/pytest 配置（exclude frontend）
 ├── requirements.txt        # Python 依赖
-├── .env.example            # 环境变量模板
+├── test.http               # 接口调试请求集（IDE HTTP Client）
+├── AGENTS.md               # Coding Agent 任务入口说明
+├── .env.example            # 环境变量模板（.env 不入库）
 └── README.md               # 项目文档
 ```
 
@@ -635,6 +648,8 @@ ai-agent-task-assistant/
 | `ANTHROPIC_AUTH_TOKEN` | (必填) | 智谱 GLM Anthropic 兼容端点 API Key（https://open.bigmodel.cn 申请） |
 | `ANTHROPIC_BASE_URL` | `https://open.bigmodel.cn/api/anthropic` | 智谱 Anthropic 兼容端点地址 |
 | `ZHIPU_MODEL` | `glm-4.5-air` | 默认模型 |
+| `ZHIPU_TEMPERATURE` | `0.7` | 采样温度（0–2） |
+| `ZHIPU_MAX_TOKENS` | `4096` | 单次最大输出 token 数 |
 | `ZHIPU_OPENAI_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4/` | 智谱 OpenAI 兼容端点（仅用于 Embedding） |
 | `ZHIPU_EMBEDDING_MODEL` | `embedding-3` | 智谱 Embedding 模型 |
 | `TAVILY_API_KEY` | (可选) | Tavily 搜索 API Key，未填则不注册 Web 搜索工具 |
@@ -655,3 +670,13 @@ ai-agent-task-assistant/
 | `MAX_EXECUTION_STEPS` | `10` | 单任务最大执行步骤 |
 | `CORS_ORIGINS` | `["http://localhost:5173", "http://127.0.0.1:5173"]` | 允许跨域的前端来源白名单（配合 allow_credentials） |
 | `DEBUG` | `false` | 调试模式 |
+
+### 预留配置（已定义未启用）
+
+以下配置在 `app/config/settings.py` 中已定义并提供 DSN/URL 计算属性，作为后续扩展预留，当前版本未在主流程中使用：
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `localhost` / `5432` / `agent_db` / `postgres` / (空) | PostgreSQL 连接（任务持久化预留，当前任务使用内存存储；提供 `postgres_dsn` / `postgres_async_dsn`） |
+| `RABBITMQ_HOST` / `RABBITMQ_PORT` / `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `localhost` / `5672` / `guest` / `guest` | RabbitMQ 消息队列（分布式任务调度预留；提供 `rabbitmq_url`） |
+| `MILVUS_HOST` / `MILVUS_PORT` | `localhost` / `19530` | Milvus 向量库（备选向量存储预留，当前使用 Chroma） |
