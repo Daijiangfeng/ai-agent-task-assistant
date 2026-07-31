@@ -3,8 +3,10 @@
 定义所有工具必须实现的统一接口。
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -19,7 +21,7 @@ class ToolOutput(BaseModel):
     """工具输出基类。"""
     success: bool
     data: Any = None
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class BaseTool(ABC):
@@ -63,7 +65,7 @@ class BaseTool(ABC):
         from langchain_core.tools import StructuredTool
 
         async def _arun(
-            query: str = "", parameters: Optional[dict[str, Any]] = None
+            query: str = "", parameters: dict[str, Any] | None = None
         ) -> str:
             # 同时转发自由文本 query 与结构化 parameters，
             # 使 sql_query / file_processing 等需要结构化入参的工具可正确取参。

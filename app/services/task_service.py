@@ -17,6 +17,11 @@ from app.models.task import SubTask, Task, TaskStatus
 logger = get_logger(__name__)
 
 
+def _utcnow_iso() -> str:
+    """返回当前 UTC 时间的 ISO 8601 字符串。"""
+    return datetime.now(timezone.utc).isoformat()
+
+
 class TaskService:
     """
     任务生命周期管理服务。
@@ -40,7 +45,7 @@ class TaskService:
             任务 ID (UUID)。
         """
         task_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = _utcnow_iso()
 
         task = Task(
             id=task_id,
@@ -89,7 +94,7 @@ class TaskService:
             return None
 
         task.status = status
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        task.updated_at = _utcnow_iso()
 
         for key, value in kwargs.items():
             if hasattr(task, key):
@@ -161,7 +166,7 @@ class TaskService:
         )
         task.subtasks = subtasks
         task.plan_version = version
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        task.updated_at = _utcnow_iso()
 
     async def sync_task_results(
         self, task_id: str, task_results: list[dict]
@@ -189,7 +194,7 @@ class TaskService:
             subtask.result = r.get("result")
             subtask.tool_used = r.get("tool_used")
             subtask.error = r.get("error")
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        task.updated_at = _utcnow_iso()
 
     async def sync_reflection(
         self,
@@ -208,7 +213,7 @@ class TaskService:
                 task.reflection = None
         if iteration_count is not None:
             task.iteration_count = iteration_count
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        task.updated_at = _utcnow_iso()
 
     async def get_task_status_response(self, task_id: str) -> TaskStatusResponse | None:
         """

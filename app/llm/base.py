@@ -3,9 +3,27 @@ LLM Provider 抽象基类。
 定义所有 LLM 供应商必须实现的统一接口。
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 from langchain_core.language_models.chat_models import BaseChatModel
+
+
+def resolve_bearer_token(token: str, error_message: str | None = None) -> str:
+    """校验并返回 Bearer token，去除首尾空白。
+
+    Args:
+        token: 待校验的 token 字符串。
+        error_message: 自定义错误信息；为 None 时使用通用提示。
+
+    Raises:
+        ValueError: token 为空时抛出，携带 error_message 或通用提示。
+    """
+    cleaned = (token or "").strip()
+    if not cleaned:
+        raise ValueError(error_message or "Missing API token")
+    return cleaned
 
 
 class BaseLLMProvider(ABC):

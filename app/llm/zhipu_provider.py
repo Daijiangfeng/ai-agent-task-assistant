@@ -10,7 +10,7 @@ from langchain_anthropic import ChatAnthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config.settings import Settings
-from app.llm.base import BaseLLMProvider
+from app.llm.base import BaseLLMProvider, resolve_bearer_token
 
 # 真实鉴权走 default_headers 中的 Authorization: Bearer <token> 头；
 # Anthropic SDK 强制要求 api_key 非空，此常量仅作为 x-api-key 占位，不参与鉴权。
@@ -39,13 +39,13 @@ class ZhipuProvider(BaseLLMProvider):
         Raises:
             ValueError: ANTHROPIC_AUTH_TOKEN 未配置或为空。
         """
-        token = (self._settings.ANTHROPIC_AUTH_TOKEN or "").strip()
-        if not token:
-            raise ValueError(
+        return resolve_bearer_token(
+            self._settings.ANTHROPIC_AUTH_TOKEN,
+            error_message=(
                 "ANTHROPIC_AUTH_TOKEN 未配置：智谱 Anthropic 兼容端点需要该 token "
                 "走 Authorization: Bearer 鉴权，请在 .env 中设置 ANTHROPIC_AUTH_TOKEN。"
-            )
-        return token
+            ),
+        )
 
     def _bearer_headers(self) -> dict[str, str]:
         """构造标准 Authorization: Bearer 鉴权头。"""

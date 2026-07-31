@@ -15,9 +15,7 @@ anthropic>=0.39.0
 langgraph>=0.2.0
 
 # Database
-asyncpg>=0.29.0
 sqlalchemy[asyncio]>=2.0.0
-alembic>=1.13.0
 
 # Redis
 redis>=5.0.0

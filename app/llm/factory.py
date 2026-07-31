@@ -9,6 +9,23 @@ from app.llm.embeddings import BaseEmbeddingProvider, ZhipuEmbeddingProvider
 from app.llm.zhipu_provider import ZhipuProvider
 
 
+def _create_provider(
+    registry: dict,
+    kind: str,
+    provider_name: str,
+    settings: Settings | None,
+):
+    """工厂共用辅助函数：从注册表查找并实例化 Provider。"""
+    provider_cls = registry.get(provider_name)
+    if not provider_cls:
+        available = ", ".join(registry.keys())
+        raise ValueError(
+            f"不支持的 {kind}: '{provider_name}'。"
+            f"可用选项: {available}"
+        )
+    return provider_cls(settings=settings or get_settings())
+
+
 class LLMProviderFactory:
     """
     LLM Provider 工厂类。
@@ -41,14 +58,7 @@ class LLMProviderFactory:
         Raises:
             ValueError: 不支持的供应商名称。
         """
-        provider_cls = cls._providers.get(provider_name)
-        if not provider_cls:
-            available = ", ".join(cls._providers.keys())
-            raise ValueError(
-                f"不支持的 LLM Provider: '{provider_name}'。"
-                f"可用选项: {available}"
-            )
-        return provider_cls(settings=settings or get_settings())
+        return _create_provider(cls._providers, "LLM Provider", provider_name, settings)
 
     @classmethod
     def register(cls, name: str, provider_cls: type[BaseLLMProvider]) -> None:
@@ -92,14 +102,7 @@ class EmbeddingProviderFactory:
         Raises:
             ValueError: 不支持的供应商名称。
         """
-        provider_cls = cls._providers.get(provider_name)
-        if not provider_cls:
-            available = ", ".join(cls._providers.keys())
-            raise ValueError(
-                f"不支持的 Embedding Provider: '{provider_name}'。"
-                f"可用选项: {available}"
-            )
-        return provider_cls(settings=settings or get_settings())
+        return _create_provider(cls._providers, "Embedding Provider", provider_name, settings)
 
 
 def create_embedding_provider(

@@ -12,6 +12,7 @@ from langchain_openai import OpenAIEmbeddings
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config.settings import Settings
+from app.llm.base import resolve_bearer_token
 
 
 class BaseEmbeddingProvider(ABC):
@@ -76,13 +77,14 @@ class ZhipuEmbeddingProvider(BaseEmbeddingProvider):
 
     def __init__(self, settings: Settings):
         self._settings = settings
-        token = (settings.ANTHROPIC_AUTH_TOKEN or "").strip()
-        if not token:
-            raise ValueError(
+        token = resolve_bearer_token(
+            settings.ANTHROPIC_AUTH_TOKEN,
+            error_message=(
                 "ANTHROPIC_AUTH_TOKEN 未配置：智谱 Embedding（OpenAI 兼容端点）"
                 "通过 api_key 走 Authorization: Bearer 鉴权，"
                 "请在 .env 中设置 ANTHROPIC_AUTH_TOKEN。"
-            )
+            ),
+        )
         self._client = OpenAIEmbeddings(
             model=settings.ZHIPU_EMBEDDING_MODEL,
             api_key=token,

@@ -11,6 +11,7 @@ import httpx
 
 from app.config.logging import get_logger
 from app.config.settings import Settings
+from app.llm.base import resolve_bearer_token
 from app.rag.base import BaseReranker, Document
 
 logger = get_logger(__name__)
@@ -43,12 +44,16 @@ class ZhipuReranker(BaseReranker):
 
     def _headers(self) -> dict[str, str]:
         """构造标准 Authorization: Bearer 鉴权头。"""
-        token = (self._settings.ANTHROPIC_AUTH_TOKEN or "").strip()
-        if not token:
-            raise RerankError(
-                "ANTHROPIC_AUTH_TOKEN 未配置：智谱 Rerank API 需要该 token "
-                "走 Authorization: Bearer 鉴权，请在 .env 中设置 ANTHROPIC_AUTH_TOKEN。"
+        try:
+            token = resolve_bearer_token(
+                self._settings.ANTHROPIC_AUTH_TOKEN,
+                error_message=(
+                    "ANTHROPIC_AUTH_TOKEN 未配置：智谱 Rerank API 需要该 token "
+                    "走 Authorization: Bearer 鉴权，请在 .env 中设置 ANTHROPIC_AUTH_TOKEN。"
+                ),
             )
+        except ValueError as e:
+            raise RerankError(str(e)) from e
         return {"Authorization": f"Bearer {token}"}
 
     async def rerank(

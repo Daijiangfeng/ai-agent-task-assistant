@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import AIMessage
 
@@ -42,7 +42,7 @@ class ToolExecutionPolicy:
     def __init__(
         self,
         allowed_tools: Iterable[str],
-        approval_hook: Optional[ApprovalHook] = None,
+        approval_hook: ApprovalHook | None = None,
     ) -> None:
         """
         Args:
@@ -53,7 +53,7 @@ class ToolExecutionPolicy:
         # 默认放行，但保留可注入的"可拒绝"钩子。
         self._approval_hook: ApprovalHook = approval_hook or (lambda name, args: True)
 
-    def check(self, tool_name: str, tool_args: dict[str, Any]) -> tuple[bool, Optional[str]]:
+    def check(self, tool_name: str, tool_args: dict[str, Any]) -> tuple[bool, str | None]:
         """
         校验某次工具调用是否允许执行。
 
@@ -92,7 +92,7 @@ class ExecutorNode:
         self,
         llm_provider: BaseLLMProvider,
         prompt_manager: PromptManager,
-        tool_approval_hook: Optional[ApprovalHook] = None,
+        tool_approval_hook: ApprovalHook | None = None,
     ):
         self.llm = llm_provider.get_chat_model()
         self.prompt_manager = prompt_manager
@@ -146,55 +146,27 @@ class ExecutorNode:
             task_id=subtask.get("id", "unknown"),
         )
 
-        # 构建之前任务的结果上下文
-        previous_results = self._build_previous_context(state["task_results"])
-
-        # 获取可用工具
-        tools = ToolRegistry.get_all_langchain_tools()
         t0 = time.perf_counter()
-
         try:
-            # 构造执行消息
-            prompt = self.prompt_manager.get_executor_prompt()
-            messages = prompt.format_messages(
-                previous_results=previous_results or "无",
-                subtask_description=subtask["description"],
-            )
-
-            if tools:
-                # 有工具时绑定 LLM
-                llm_with_tools = self.llm.bind_tools(tools)
-                response = await llm_with_tools.ainvoke(messages)
-
-                # 处理工具调用
-                if response.tool_calls:
-                    result_content = await self._execute_tool_calls(
-                        response, tools, messages, llm_with_tools
-                    )
-                else:
-                    result_content = response.content
-            else:
-                # 无工具时直接调用 LLM
-                response = await self.llm.ainvoke(messages)
-                result_content = response.content
-
-            # 构造任务结果
-            exec_ms = (time.perf_counter() - t0) * 1000
+            task_result = await self._execute_single_subtask(idx, subtask, state["task_results"])
+        except Exception as e:
+            logger.error("Executor: 子任务执行失败", error=str(e), index=idx)
             task_result = {
                 "subtask_id": subtask.get("id", f"task_{idx}"),
                 "description": subtask["description"],
-                "result": result_content,
-                "status": "completed",
-                "latency_ms": round(exec_ms, 1),
+                "result": None,
+                "status": "failed",
+                "error": str(e),
             }
 
+        if task_result["status"] == "completed":
+            exec_ms = (time.perf_counter() - t0) * 1000
             logger.info(
                 "Executor: 子任务完成",
                 index=idx,
                 task_id=task_result["subtask_id"],
                 latency_ms=round(exec_ms, 1),
             )
-
             return {
                 "current_task_index": idx + 1,
                 "task_results": [task_result],
@@ -206,24 +178,56 @@ class ExecutorNode:
                 ],
                 "errors": [],
             }
-
-        except Exception as e:
-            logger.error("Executor: 子任务执行失败", error=str(e), index=idx)
-
-            task_result = {
-                "subtask_id": subtask.get("id", f"task_{idx}"),
-                "description": subtask["description"],
-                "result": None,
-                "status": "failed",
-                "error": str(e),
-            }
-
+        else:
             return {
                 "current_task_index": idx + 1,
                 "task_results": [task_result],
                 "messages": [],
-                "errors": [f"Executor subtask {idx} failed: {str(e)}"],
+                "errors": [f"Executor subtask {idx} failed: {task_result.get('error', '')}"],
             }
+
+    async def _execute_single_subtask(
+        self, task_idx: int, subtask: dict, task_results: list[dict]
+    ) -> dict[str, Any]:
+        """执行单个子任务的核心逻辑，供串行和并行路径共用。
+
+        Returns:
+            成功时返回含 result/status='completed'/latency_ms 的字典。
+
+        Raises:
+            Exception: 执行失败时向上抛出，由调用方决定如何处理。
+        """
+        previous_results = self._build_previous_context(task_results)
+        tools = ToolRegistry.get_all_langchain_tools()
+        t0 = time.perf_counter()
+
+        prompt = self.prompt_manager.get_executor_prompt()
+        messages = prompt.format_messages(
+            previous_results=previous_results or "无",
+            subtask_description=subtask["description"],
+        )
+
+        if tools:
+            llm_with_tools = self.llm.bind_tools(tools)
+            response = await llm_with_tools.ainvoke(messages)
+            if response.tool_calls:
+                result_content = await self._execute_tool_calls(
+                    response, tools, messages, llm_with_tools
+                )
+            else:
+                result_content = response.content
+        else:
+            response = await self.llm.ainvoke(messages)
+            result_content = response.content
+
+        exec_ms = (time.perf_counter() - t0) * 1000
+        return {
+            "subtask_id": subtask.get("id", f"task_{task_idx}"),
+            "description": subtask["description"],
+            "result": result_content,
+            "status": "completed",
+            "latency_ms": round(exec_ms, 1),
+        }
 
     async def _execute_tool_calls(
         self, response, tools: list, messages: list, llm_with_tools
@@ -381,45 +385,15 @@ class ExecutorNode:
 
         async def _exec_one(task_idx: int) -> dict[str, Any]:
             subtask = subtasks[task_idx]
-            previous_results = self._build_previous_context(state["task_results"])
-            tools = ToolRegistry.get_all_langchain_tools()
-            t0 = time.perf_counter()
-
             try:
-                prompt = self.prompt_manager.get_executor_prompt()
-                messages = prompt.format_messages(
-                    previous_results=previous_results or "无",
-                    subtask_description=subtask["description"],
-                )
-                if tools:
-                    llm_with_tools = self.llm.bind_tools(tools)
-                    response = await llm_with_tools.ainvoke(messages)
-                    if response.tool_calls:
-                        result_content = await self._execute_tool_calls(
-                            response, tools, messages, llm_with_tools
-                        )
-                    else:
-                        result_content = response.content
-                else:
-                    response = await self.llm.ainvoke(messages)
-                    result_content = response.content
-
-                exec_ms = (time.perf_counter() - t0) * 1000
-                return {
-                    "subtask_id": subtask.get("id", f"task_{task_idx}"),
-                    "description": subtask["description"],
-                    "result": result_content,
-                    "status": "completed",
-                    "latency_ms": round(exec_ms, 1),
-                }
+                return await self._execute_single_subtask(task_idx, subtask, state["task_results"])
             except Exception as e:
-                exec_ms = (time.perf_counter() - t0) * 1000
                 return {
                     "subtask_id": subtask.get("id", f"task_{task_idx}"),
                     "description": subtask["description"],
                     "result": f"执行失败: {str(e)}",
                     "status": "failed",
-                    "latency_ms": round(exec_ms, 1),
+                    "latency_ms": 0.0,
                 }
 
         # Execute all tasks in the batch concurrently

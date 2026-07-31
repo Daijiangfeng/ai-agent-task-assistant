@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
+from typing import Any
 
 from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
@@ -63,7 +63,7 @@ class VectorLongTermMemory(BaseMemory):
             metadatas=[{"key": key, "created_at": time.time()}],
         )
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """
         按 key 精确获取记忆内容。
 

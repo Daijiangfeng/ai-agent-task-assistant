@@ -64,16 +64,6 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
 
-    # ---- RabbitMQ ----
-    RABBITMQ_HOST: str = "localhost"
-    RABBITMQ_PORT: int = 5672
-    RABBITMQ_USER: str = "guest"
-    RABBITMQ_PASSWORD: str = "guest"
-
-    # ---- Milvus ----
-    MILVUS_HOST: str = "localhost"
-    MILVUS_PORT: int = 19530
-
     # ---- Web Search (Tavily) ----
     TAVILY_API_KEY: str = Field(default="", description="Tavily 搜索 API Key")
     WEB_SEARCH_MAX_RESULTS: int = Field(default=5, ge=1, le=20)
@@ -119,9 +109,6 @@ class Settings(BaseSettings):
     MAX_REPLAN_ITERATIONS: int = Field(
         default=3, ge=1, description="最大重新规划次数，防止无限循环"
     )
-    MAX_EXECUTION_STEPS: int = Field(
-        default=10, ge=1, description="单任务最大执行步骤数"
-    )
 
     # ---- 计算属性 ----
     @property
@@ -159,14 +146,6 @@ class Settings(BaseSettings):
             return self.SQLITE_SANDBOX_PATH
         return str(BASE_DIR / "data" / "sandbox.db")
 
-    @property
-    def rabbitmq_url(self) -> str:
-        """RabbitMQ 连接 URL"""
-        return (
-            f"amqp://{self.RABBITMQ_USER}:{self.RABBITMQ_PASSWORD}"
-            f"@{self.RABBITMQ_HOST}:{self.RABBITMQ_PORT}//"
-        )
-
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
@@ -175,7 +154,7 @@ class Settings(BaseSettings):
     )
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """获取全局配置单例（缓存）。"""
     return Settings()
