@@ -1,0 +1,31 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-8) var(--space-5);
+  color: var(--ink-secondary);
+}
+
+.icon {
+  font-size: 36px;
+  color: var(--ink-tertiary);
+  margin-bottom: var(--space-3);
+}
+
+.title {
+  font-size: 19px;
+  letter-spacing: normal;
+  color: var(--ink);
+}
+
+.desc {
+  margin-top: var(--space-2);
+  max-width: 42ch;
+  color: var(--ink-secondary);
+}
+
+.action {
+  margin-top: var(--space-5);
+}

@@ -1,0 +1,72 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-pill);
+  font-weight: var(--weight-regular);
+  cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-base),
+    opacity var(--transition-base);
+  white-space: nowrap;
+}
+
+.btn:active:not(:disabled) {
+  transform: var(--press-scale);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.md {
+  padding: 12px 22px;
+  font-size: 17px;
+}
+
+.sm {
+  padding: 7px 15px;
+  font-size: 14px;
+}
+
+.primary {
+  background: var(--accent);
+  color: #fff;
+}
+.primary:hover:not(:disabled) {
+  background: var(--accent-focus);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+}
+.ghost:hover:not(:disabled) {
+  background: rgba(0, 102, 204, 0.06);
+}
+
+.tool {
+  background: var(--dark-1);
+  color: var(--on-dark);
+}
+.tool:hover:not(:disabled) {
+  background: var(--dark-2);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

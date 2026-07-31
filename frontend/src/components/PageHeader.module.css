@@ -1,0 +1,24 @@
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 34px;
+}
+
+.subtitle {
+  margin-top: var(--space-2);
+  color: var(--ink-secondary);
+  font-size: 17px;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}

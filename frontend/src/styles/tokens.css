@@ -1,0 +1,83 @@
+/*
+ * Apple 设计令牌（单一事实源）。
+ * 来源：DESIGN.md —— 唯一强调色、唯一产品阴影、负字距标题、8px 间距基数。
+ * 禁止在此之外新增第二强调色或渐变。
+ */
+
+:root {
+  /* ---- 颜色：唯一强调色 Action Blue ---- */
+  --accent: #0066cc; /* 唯一强调色 */
+  --accent-focus: #0071e3; /* 聚焦态 */
+  --accent-link-dark: #2997ff; /* 暗底链接 */
+
+  /* ---- 中性色 ---- */
+  --ink: #1d1d1f; /* 主文字（墨色） */
+  --ink-secondary: #6e6e73; /* 次级文字 */
+  --ink-tertiary: #86868b; /* 三级文字/占位 */
+  --parchment: #f5f5f7; /* 浅色背景（羊皮纸） */
+  --surface: #ffffff; /* 卡片表面 */
+  --hairline: rgba(0, 0, 0, 0.1); /* 发丝分隔线 */
+  --hairline-strong: rgba(0, 0, 0, 0.18);
+
+  /* ---- 暗色瓦片 ---- */
+  --dark-1: #272729;
+  --dark-2: #2a2a2c;
+  --dark-3: #252527;
+  --nav-black: #000000; /* 导航纯黑 */
+  --on-dark: #f5f5f7; /* 暗底文字 */
+  --on-dark-secondary: #a1a1a6;
+
+  /* ---- 状态色（仅用于状态语义，非强调色）---- */
+  --status-pending: #86868b;
+  --status-planning: #0066cc;
+  --status-executing: #0071e3;
+  --status-reflecting: #5e5ce6;
+  --status-replanning: #bf5af2;
+  --status-completed: #248a3d;
+  --status-failed: #d70015;
+
+  /* ---- 排版 ---- */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas,
+    monospace;
+
+  --text-body: 17px; /* 正文 */
+  --leading-body: 1.47;
+  --leading-tight: 1.1;
+  --tracking-display: -0.01em; /* 大标题负字距 */
+
+  --weight-light: 300;
+  --weight-regular: 400;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* ---- 间距（8px 基数）---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 17px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 80px;
+
+  /* ---- 圆角 ---- */
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 11px;
+  --radius-xl: 18px;
+  --radius-pill: 9999px;
+
+  /* ---- 阴影：全局唯一，仅用于"产品/内容卡放在表面"的意象 ---- */
+  --shadow-product: rgba(0, 0, 0, 0.22) 3px 5px 30px;
+
+  /* ---- 交互 ---- */
+  --press-scale: scale(0.95);
+  --transition-fast: 120ms ease;
+  --transition-base: 200ms ease;
+
+  /* ---- 布局 ---- */
+  --nav-width: 260px;
+  --content-max: 1200px;
+}
