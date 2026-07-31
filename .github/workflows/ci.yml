@@ -42,4 +42,6 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit dependencies
-        run: pip-audit -r requirements.txt --desc on --progress-spinner off
+        # 忽略 PYSEC-2026-311（chromadb >=1.0.0，经 trust_remote_code=true 触发的认证前代码执行）：
+        # 官方暂无修复版本；本项目未使用 trust_remote_code，chromadb 为内嵌持久化使用，未对外暴露服务端点，实际不可利用。
+        run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-311 --desc on --progress-spinner off
