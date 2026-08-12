@@ -109,6 +109,9 @@ class Settings(BaseSettings):
     MAX_REPLAN_ITERATIONS: int = Field(
         default=3, ge=1, description="最大重新规划次数，防止无限循环"
     )
+    MAX_EXECUTION_STEPS: int = Field(
+        default=10, ge=1, description="单任务最大执行步骤，防止无限循环"
+    )
 
     # ---- 计算属性 ----
     @property

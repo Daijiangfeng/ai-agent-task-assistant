@@ -6,7 +6,8 @@
 ## 项目定位
 
 - 后端：Python 3.11+，**FastAPI** Web 框架 + **LangGraph** Agent 状态机（不是 django/rails；
-  `app/config/settings.py` 是 Pydantic Settings，与 Django 无关）。入口为仓库根 `main.py`。
+  `app/config/settings.py` 是 Pydantic Settings，与 Django 无关）。应用工厂位于 `app/main.py`，
+  仓库根 `main.py` 为薄入口（透传 `app`，兼容 `uvicorn main:app`）。
 - 前端：React 18 + Vite + TypeScript SPA，位于 `frontend/`，由 npm 独立管理。
 - 用途：企业级 AI Agent 任务执行助手（任务规划、工具调用、RAG 知识增强、长期记忆、自我反思）。
 

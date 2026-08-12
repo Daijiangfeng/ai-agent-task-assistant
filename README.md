@@ -541,6 +541,7 @@ npm run test   # vitest run
 ```
 ai-agent-task-assistant/
 ├── app/
+│   ├── main.py             # FastAPI 应用工厂 + lifespan + 中间件
 │   ├── agent/              # Agent Workflow (LangGraph 状态机)
 │   │   ├── state.py        # 全局状态定义
 │   │   ├── planner_node.py # Planner 节点（含 replan 重规划）
@@ -554,6 +555,7 @@ ai-agent-task-assistant/
 │   │   │   ├── knowledge.py# 知识库入库/上传/检索/列表/删除 API
 │   │   │   ├── stats.py    # 系统概览统计 API
 │   │   │   └── tools.py    # 工具清单 API
+│   │   ├── health.py       # 健康检查端点（/health，根路径）
 │   │   ├── router.py       # 路由汇总（前缀 /api/v1）
 │   │   ├── deps.py         # 依赖注入
 │   │   └── errors.py       # 全局异常处理（AppException + 中间件）
@@ -630,7 +632,7 @@ ai-agent-task-assistant/
 │   └── ci.yml              # CI：quality-gate（ruff+pytest）+ security（pip-audit）
 ├── data/                   # 运行期产物（Chroma 向量库 / SQL 沙箱，不提交）
 ├── docs/                   # 技术文档（docx）
-├── main.py                 # FastAPI 入口（应用工厂 + lifespan 初始化）
+├── main.py                 # 薄入口 shim（透传 app.main.app，兼容 uvicorn main:app）
 ├── pyproject.toml          # 项目配置 + ruff/pytest 配置（exclude frontend）
 ├── requirements.txt        # Python 依赖
 ├── test.http               # 接口调试请求集（IDE HTTP Client）
