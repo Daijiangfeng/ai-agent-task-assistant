@@ -12,7 +12,28 @@ from app.rag.loader import DocumentLoader
 from app.rag.retriever import ChromaRetriever
 from app.rag.service import RAGService
 from app.rag.splitter import TextSplitter
-from app.rag.vector_store import ChromaStore
+from app.rag.vector_store import ChromaStore, create_vector_store
+
+
+class TestVectorStoreFactory:
+    """向量库后端工厂测试。"""
+
+    def test_default_backend_is_chroma(self, temp_chroma_dir, monkeypatch):
+        monkeypatch.setenv("CHROMA_PERSIST_DIR", temp_chroma_dir)
+        store = create_vector_store(Settings(VECTOR_STORE_BACKEND="chroma"))
+        assert isinstance(store, ChromaStore)
+
+    def test_pgvector_backend_selected(self):
+        from app.rag.vector_store_pg import PgVectorStore
+
+        store = create_vector_store(
+            Settings(VECTOR_STORE_BACKEND="pgvector", POSTGRES_HOST="127.0.0.1", POSTGRES_PORT=1)
+        )
+        assert isinstance(store, PgVectorStore)
+
+    def test_unknown_backend_raises(self):
+        with pytest.raises(ValueError):
+            create_vector_store(Settings(VECTOR_STORE_BACKEND="milvus"))
 
 
 class TestDocumentLoader:

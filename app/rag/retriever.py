@@ -9,22 +9,22 @@ from app.config.logging import get_logger
 from app.llm.embeddings import BaseEmbeddingProvider
 from app.rag.base import BaseRetriever, Document
 from app.rag.indexer import RAG_COLLECTION
-from app.rag.vector_store import ChromaStore
+from app.rag.vector_store import BaseVectorStore
 
 logger = get_logger(__name__)
 
 
 class ChromaRetriever(BaseRetriever):
     """
-    Chroma 检索器。
+    向量检索器。
 
-    流程：query -> embed(智谱) -> Chroma 相似度检索 -> Document 列表。
+    流程：query -> embed(智谱) -> 向量库相似度检索 -> Document 列表。
     """
 
     def __init__(
         self,
         embedding_provider: BaseEmbeddingProvider,
-        vector_store: ChromaStore,
+        vector_store: BaseVectorStore,
         collection_name: str = RAG_COLLECTION,
     ):
         self._embedding = embedding_provider

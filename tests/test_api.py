@@ -11,6 +11,26 @@ from fastapi.testclient import TestClient
 from main import app
 
 
+@pytest.fixture(autouse=True)
+def memory_task_service():
+    """
+    将 TaskService 依赖固定为内存后端。
+
+    默认后端为 auto（PostgreSQL 优先），本机若运行 PostgreSQL 会导致
+    API 测试读写真实数据库，破坏测试隔离；内存后端保证测试确定性且离线可跑。
+    """
+    from app.api.deps import get_task_service
+    from app.config.settings import Settings
+    from app.services.task_service import TaskService
+
+    svc = TaskService(Settings(TASK_STORAGE_BACKEND="memory"))
+    app.dependency_overrides[get_task_service] = lambda: svc
+    try:
+        yield svc
+    finally:
+        app.dependency_overrides.pop(get_task_service, None)
+
+
 @pytest.fixture
 def client():
     """创建测试客户端。"""
@@ -148,3 +168,151 @@ class TestTaskAPI:
         # 再次执行应返回 400
         response = client.post(f"/api/v1/tasks/{task_id}/execute")
         assert response.status_code == 400
+
+
+class TestAPIAuthentication:
+    """API 认证与授权测试（AUTH_ENABLED 生产模式）。"""
+
+    def _enable_auth(self, monkeypatch, keys: str = "secret-key-1"):
+        from app.api import auth as auth_module
+
+        monkeypatch.setattr(
+            auth_module,
+            "get_settings",
+            lambda: type(
+                "S", (), {"AUTH_ENABLED": True, "API_KEYS": keys}
+            )(),
+        )
+
+    def test_missing_api_key_rejected(self, client: TestClient, monkeypatch):
+        """启用认证后，无 API Key 的请求返回 401。"""
+        self._enable_auth(monkeypatch)
+        response = client.get("/api/v1/tools")
+        assert response.status_code == 401
+
+    def test_invalid_api_key_rejected(self, client: TestClient, monkeypatch):
+        """错误的 API Key 返回 401。"""
+        self._enable_auth(monkeypatch)
+        response = client.get(
+            "/api/v1/tools", headers={"X-API-Key": "wrong-key"}
+        )
+        assert response.status_code == 401
+
+    def test_valid_api_key_allowed(self, client: TestClient, monkeypatch):
+        """有效的 API Key（Bearer 头）放行。"""
+        self._enable_auth(monkeypatch)
+        response = client.get(
+            "/api/v1/tools", headers={"Authorization": "Bearer secret-key-1"}
+        )
+        assert response.status_code == 200
+
+    def test_auth_disabled_default_pass(self, client: TestClient):
+        """未启用认证（开发模式）默认放行。"""
+        response = client.get("/api/v1/tools")
+        assert response.status_code == 200
+
+
+class TestTaskOwnership:
+    """资源所有权检查（Resource Ownership Check）测试。"""
+
+    def _create_task_as(self, client: TestClient, user_id: str) -> str:
+        resp = client.post(
+            "/api/v1/tasks/",
+            json={"goal": f"{user_id} 的任务"},
+            headers={"X-User-Id": user_id},
+        )
+        assert resp.status_code == 201
+        return resp.json()["task_id"]
+
+    def test_owner_can_access_own_task(self, client: TestClient):
+        """任务所有者可以查询自己的任务。"""
+        task_id = self._create_task_as(client, "alice")
+        response = client.get(
+            f"/api/v1/tasks/{task_id}", headers={"X-User-Id": "alice"}
+        )
+        assert response.status_code == 200
+        assert response.json()["task_id"] == task_id
+
+    def test_other_user_forbidden(self, client: TestClient):
+        """其他用户访问他人任务返回 403。"""
+        task_id = self._create_task_as(client, "alice")
+        response = client.get(
+            f"/api/v1/tasks/{task_id}",
+            headers={"X-User-Id": "bob", "X-User-Role": "user"},
+        )
+        assert response.status_code == 403
+
+    def test_admin_can_access_any_task(self, client: TestClient):
+        """admin 角色可访问任意任务。"""
+        task_id = self._create_task_as(client, "alice")
+        response = client.get(
+            f"/api/v1/tasks/{task_id}",
+            headers={"X-User-Id": "root", "X-User-Role": "admin"},
+        )
+        assert response.status_code == 200
+
+    def test_guest_cannot_execute_others_task(self, client: TestClient):
+        """guest 角色访问他人任务返回 403。"""
+        task_id = self._create_task_as(client, "alice")
+        response = client.get(
+            f"/api/v1/tasks/{task_id}",
+            headers={"X-User-Id": "guest-user", "X-User-Role": "guest"},
+        )
+        assert response.status_code == 403
+
+    def test_same_user_different_tenant_forbidden(self, client: TestClient):
+        """同一用户跨租户访问他人租户任务返回 403（多租户隔离）。"""
+        resp = client.post(
+            "/api/v1/tasks/",
+            json={"goal": "租户A的任务"},
+            headers={"X-User-Id": "alice", "X-Tenant-Id": "tenant_a"},
+        )
+        task_id = resp.json()["task_id"]
+        response = client.get(
+            f"/api/v1/tasks/{task_id}",
+            headers={
+                "X-User-Id": "alice",
+                "X-Tenant-Id": "tenant_b",
+                "X-User-Role": "user",
+            },
+        )
+        assert response.status_code == 403
+
+    def test_task_list_isolated_by_tenant_and_user(self, client: TestClient):
+        """任务列表按租户+用户过滤：普通用户看不到其他租户/用户的任务。"""
+        client.post(
+            "/api/v1/tasks/",
+            json={"goal": "租户A的任务"},
+            headers={"X-User-Id": "alice", "X-Tenant-Id": "tenant_a"},
+        )
+        client.post(
+            "/api/v1/tasks/",
+            json={"goal": "租户B的任务"},
+            headers={"X-User-Id": "alice", "X-Tenant-Id": "tenant_b"},
+        )
+        resp = client.get(
+            "/api/v1/tasks/",
+            headers={
+                "X-User-Id": "alice",
+                "X-Tenant-Id": "tenant_a",
+                "X-User-Role": "user",
+            },
+        )
+        data = resp.json()
+        assert data["total"] == 1
+        assert all(t["task_id"] for t in data["tasks"])
+
+    @patch(
+        "app.services.agent_service.AgentService.run_task",
+        new_callable=AsyncMock,
+        return_value="mock result",
+    )
+    def test_guest_cannot_execute_task(self, mock_run, client: TestClient):
+        """guest 角色不能启动他人任务的执行。"""
+        task_id = self._create_task_as(client, "alice")
+        response = client.post(
+            f"/api/v1/tasks/{task_id}/execute",
+            headers={"X-User-Id": "guest-user", "X-User-Role": "guest"},
+        )
+        assert response.status_code == 403
+        mock_run.assert_not_called()

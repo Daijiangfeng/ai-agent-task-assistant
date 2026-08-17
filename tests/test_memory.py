@@ -117,6 +117,66 @@ class TestVectorLongTermMemory:
         await mem.delete("m1")
         assert await mem.get("m1") is None
 
+    # ---- 数据隔离（多用户 / 多租户） ----
+
+    @pytest.mark.asyncio
+    async def test_search_isolated_by_user(self, temp_chroma_dir, mock_embedding_provider):
+        """用户 B 搜索不能召回用户 A 的记忆（同租户）。"""
+        mem = self._make_memory(temp_chroma_dir, mock_embedding_provider)
+        await mem.save(
+            "pref", "我的银行卡号是 6222 0000 1111",
+            user_id="alice", tenant_id="company_a",
+        )
+        await mem.save(
+            "pref", "我的银行卡号是 8888 9999 0000",
+            user_id="bob", tenant_id="company_a",
+        )
+        results = await mem.search(
+            "银行卡", top_k=5, user_id="alice", tenant_id="company_a"
+        )
+        assert len(results) == 1
+        assert "6222" in results[0]["value"]
+
+    @pytest.mark.asyncio
+    async def test_search_isolated_by_tenant(self, temp_chroma_dir, mock_embedding_provider):
+        """跨租户不能互相召回（同一用户不同租户）。"""
+        mem = self._make_memory(temp_chroma_dir, mock_embedding_provider)
+        await mem.save("k", "公司A的银行卡信息", user_id="alice", tenant_id="company_a")
+        await mem.save("k", "公司B的银行卡信息", user_id="alice", tenant_id="company_b")
+        results = await mem.search("银行卡", top_k=5, user_id="alice", tenant_id="company_a")
+        assert len(results) == 1
+        assert "公司A" in results[0]["value"]
+
+    @pytest.mark.asyncio
+    async def test_get_isolated(self, temp_chroma_dir, mock_embedding_provider):
+        """跨作用域 get 返回 None。"""
+        mem = self._make_memory(temp_chroma_dir, mock_embedding_provider)
+        await mem.save("k", "secret", user_id="alice", tenant_id="t1")
+        assert await mem.get("k", user_id="alice", tenant_id="t1") == "secret"
+        assert await mem.get("k", user_id="bob", tenant_id="t1") is None
+        assert await mem.get("k", user_id="alice", tenant_id="t2") is None
+
+    @pytest.mark.asyncio
+    async def test_same_key_different_scope_coexists(
+        self, temp_chroma_dir, mock_embedding_provider
+    ):
+        """不同用户使用相同 key 互不覆盖。"""
+        mem = self._make_memory(temp_chroma_dir, mock_embedding_provider)
+        await mem.save("k", "alice 版", user_id="alice", tenant_id="t")
+        await mem.save("k", "bob 版", user_id="bob", tenant_id="t")
+        assert await mem.get("k", user_id="alice", tenant_id="t") == "alice 版"
+        assert await mem.get("k", user_id="bob", tenant_id="t") == "bob 版"
+
+    @pytest.mark.asyncio
+    async def test_delete_isolated(self, temp_chroma_dir, mock_embedding_provider):
+        """删除仅影响当前作用域。"""
+        mem = self._make_memory(temp_chroma_dir, mock_embedding_provider)
+        await mem.save("k", "alice 版", user_id="alice", tenant_id="t")
+        await mem.save("k", "bob 版", user_id="bob", tenant_id="t")
+        await mem.delete("k", user_id="alice", tenant_id="t")
+        assert await mem.get("k", user_id="alice", tenant_id="t") is None
+        assert await mem.get("k", user_id="bob", tenant_id="t") == "bob 版"
+
 
 class TestMemoryFactory:
     """记忆工厂测试。"""

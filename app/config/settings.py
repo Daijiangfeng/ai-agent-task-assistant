@@ -30,6 +30,18 @@ class Settings(BaseSettings):
         description="允许跨域访问的前端来源白名单（配合 allow_credentials 使用）",
     )
 
+    # ---- API 认证 ----
+    AUTH_ENABLED: bool = Field(
+        default=False,
+        description="是否启用 API 认证（生产环境必须开启）。"
+        "开启后所有 /api/v1 接口必须携带有效 API Key。",
+    )
+    API_KEYS: str = Field(
+        default="",
+        description="逗号分隔的合法 API Key 列表（生产环境配置）。"
+        "请求需通过 Authorization: Bearer <key> 或 X-API-Key: <key> 携带。",
+    )
+
     # ---- 智谱 LLM 配置（Anthropic 兼容端点） ----
     ANTHROPIC_AUTH_TOKEN: str = Field(
         default="",
@@ -58,6 +70,22 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "agent_db"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = ""
+    DB_CONNECT_TIMEOUT: float = Field(
+        default=3.0, ge=0.5, le=30, description="数据库连接超时（秒）"
+    )
+
+    # ---- 任务存储（TaskService 持久化后端） ----
+    # auto: 优先 PostgreSQL，不可用则降级内存；postgres/sqlite/memory: 强制指定。
+    TASK_STORAGE_BACKEND: str = Field(
+        default="auto",
+        description=(
+            "任务存储后端：auto | postgres | sqlite | memory"
+            "（auto=PostgreSQL 优先，失败降级内存）"
+        ),
+    )
+    TASK_DB_PATH: str = Field(
+        default="", description="sqlite 任务库路径，留空则用 data/tasks.db"
+    )
 
     # ---- Redis ----
     REDIS_HOST: str = "localhost"
@@ -71,6 +99,21 @@ class Settings(BaseSettings):
     # ---- Chroma 向量库 ----
     CHROMA_PERSIST_DIR: str = Field(
         default="", description="Chroma 持久化目录，留空则用 data/chroma"
+    )
+
+    # ---- 向量库后端（可插拔） ----
+    # chroma: 进程内持久化，适合开发/单机 Demo；
+    # pgvector: PostgreSQL 扩展，适合生产多实例部署（Milvus/Qdrant 可同理扩展）。
+    VECTOR_STORE_BACKEND: str = Field(
+        default="chroma", description="向量库后端：chroma | pgvector"
+    )
+    EMBEDDING_DIM: int = Field(
+        default=2048,
+        ge=1,
+        description=(
+            "pgvector 建表向量维度，必须与 embedding 模型输出一致"
+            "（智谱 embedding-3 默认 2048）"
+        ),
     )
 
     # ---- RAG 配置 ----
@@ -103,6 +146,17 @@ class Settings(BaseSettings):
     # ---- Memory 配置 ----
     ENABLE_LONG_TERM_MEMORY: bool = Field(
         default=False, description="是否启用长期记忆（需配置 ANTHROPIC_AUTH_TOKEN）"
+    )
+
+    # ---- LangGraph Checkpoint 配置 ----
+    # 启用后每个任务（thread_id=task_id）的执行状态写入检查点，支持崩溃恢复/断点续跑。
+    ENABLE_CHECKPOINTING: bool = Field(
+        default=True, description="是否启用 LangGraph Checkpoint 持久化"
+    )
+    # auto: 优先 PostgreSQL（PostgresSaver），不可用则降级内存 MemorySaver；
+    # postgres: 强制 PostgresSaver；memory: 强制进程内 MemorySaver。
+    CHECKPOINT_BACKEND: str = Field(
+        default="auto", description="Checkpoint 后端：auto | postgres | memory"
     )
 
     # ---- Agent 配置 ----
@@ -148,6 +202,13 @@ class Settings(BaseSettings):
         if self.SQLITE_SANDBOX_PATH:
             return self.SQLITE_SANDBOX_PATH
         return str(BASE_DIR / "data" / "sandbox.db")
+
+    @property
+    def task_db_path(self) -> str:
+        """sqlite 任务库路径（绝对路径）"""
+        if self.TASK_DB_PATH:
+            return self.TASK_DB_PATH
+        return str(BASE_DIR / "data" / "tasks.db")
 
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),

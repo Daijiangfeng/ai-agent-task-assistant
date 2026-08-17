@@ -11,6 +11,7 @@ from app.models.plan import Plan, ReflectionResult
 from app.models.task import SubTask, TaskStatus
 from app.tools.builtins import register_builtin_tools
 from app.tools.registry import ToolRegistry
+from app.tools.security import ROLE_GUEST, ROLE_USER, ToolContext
 
 
 class TestAgentState:
@@ -221,6 +222,24 @@ class TestToolExecutionPolicy:
         assert allowed is False
         assert reason and "web_search" in reason
 
+    def test_guest_role_denied_by_permission_matrix(self):
+        """已注册但角色无权的工具（guest -> sql）仍被拒绝："已注册" != "允许"。"""
+        policy = ToolExecutionPolicy(
+            allowed_tools={"sql_query"}, context=ToolContext(role=ROLE_GUEST)
+        )
+        allowed, reason = policy.check("sql_query", {"query": "SELECT 1"})
+        assert allowed is False
+        assert "无权" in reason
+
+    def test_user_role_allowed_by_permission_matrix(self):
+        """user 角色可以调用已注册的 SQL 工具。"""
+        policy = ToolExecutionPolicy(
+            allowed_tools={"sql_query"}, context=ToolContext(role=ROLE_USER)
+        )
+        allowed, reason = policy.check("sql_query", {"query": "SELECT 1"})
+        assert allowed is True
+        assert reason is None
+
 
 class TestExecutorToolBoundary:
     """Executor 调用链上的执行边界集成测试。"""
@@ -314,3 +333,61 @@ class TestExecutorToolBoundary:
         )
 
         assert calc_tool.invoked is True
+
+    @pytest.mark.asyncio
+    async def test_guest_role_tool_call_blocked(self, monkeypatch):
+        """guest 角色请求调用 sql 类工具时，权限矩阵拒绝且工具不被执行。"""
+
+        sql_tool = _FakeTool("sql_query")
+        llm_with_tools = _FakeLLMWithTools()
+        executor = _make_executor()
+        guest_ctx = ToolContext(role=ROLE_GUEST)
+
+        response = _FakeResponse(
+            tool_calls=[{"name": "sql_query", "args": {"query": "SELECT 1"}, "id": "call_g"}]
+        )
+
+        await executor._execute_tool_calls(
+            response,
+            tools=[sql_tool],
+            messages=[],
+            llm_with_tools=llm_with_tools,
+            tool_context=guest_ctx,
+        )
+
+        # 越权调用不会触达工具实现
+        assert sql_tool.invoked is False
+        # 回填给 LLM 的消息包含权限拒绝说明
+        blocked = [
+            m
+            for m in llm_with_tools.last_messages
+            if getattr(m, "content", "").startswith("工具调用被拒绝")
+        ]
+        assert blocked, "应向 LLM 回填权限拒绝说明"
+
+
+class TestPromptLayering:
+    """Prompt 输入分层与外部数据标记测试（Prompt Injection 防护）。"""
+
+    def test_executor_prompt_layered(self):
+        """Executor Prompt：system 纯规则，子任务与历史结果位于 human 层。"""
+        from langchain_core.prompts import SystemMessagePromptTemplate
+
+        from app.prompts.executor import EXECUTOR_PROMPT, EXECUTOR_SYSTEM_PROMPT
+
+        messages = EXECUTOR_PROMPT.messages
+        assert isinstance(messages[0], SystemMessagePromptTemplate)
+        # human 层包含子任务描述与之前结果（保持“当前子任务”段落结构）
+        human_prompt = messages[1]
+        assert "subtask_description" in getattr(human_prompt, "input_variables", [])
+        assert "previous_results" in getattr(human_prompt, "input_variables", [])
+        # 外部数据安全规则已注入 system
+        assert "external_knowledge" in EXECUTOR_SYSTEM_PROMPT
+        assert "不执行" in EXECUTOR_SYSTEM_PROMPT
+
+    def test_planner_prompt_external_data_rule(self):
+        """Planner Prompt：包含外部数据标记说明与注入防护规则。"""
+        from app.prompts.planner import PLANNER_SYSTEM_PROMPT
+
+        assert "external_knowledge" in PLANNER_SYSTEM_PROMPT
+        assert "忽略" in PLANNER_SYSTEM_PROMPT

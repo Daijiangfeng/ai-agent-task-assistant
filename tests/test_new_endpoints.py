@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_rag_service
+from app.config.settings import Settings
 from app.services.task_service import TaskService
 from main import app
 
@@ -80,7 +81,7 @@ class TestTaskStateWriteback:
     @pytest.mark.asyncio
     async def test_sync_plan_populates_subtasks(self):
         """sync_plan 应将 plan dict 重建为 Plan 与 SubTask 写回任务。"""
-        service = TaskService()
+        service = TaskService(Settings(TASK_STORAGE_BACKEND="memory"))
         task_id = await service.create_task(goal="写回测试")
         await service.sync_plan(
             task_id,
@@ -104,7 +105,7 @@ class TestTaskStateWriteback:
         """sync_task_results 完成子任务后，进度应正确计算（不再恒为 0）。"""
         from app.models.task import TaskStatus
 
-        service = TaskService()
+        service = TaskService(Settings(TASK_STORAGE_BACKEND="memory"))
         task_id = await service.create_task(goal="进度测试")
         await service.sync_plan(
             task_id,
@@ -137,7 +138,7 @@ class TestTaskStateWriteback:
         """count_by_status 返回覆盖全部状态枚举的计数字典。"""
         from app.models.task import TaskStatus
 
-        service = TaskService()
+        service = TaskService(Settings(TASK_STORAGE_BACKEND="memory"))
         await service.create_task(goal="a")
         await service.create_task(goal="b")
         counts = await service.count_by_status()

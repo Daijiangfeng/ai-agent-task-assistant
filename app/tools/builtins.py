@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from app.config.logging import get_logger
 from app.config.settings import get_settings
 from app.tools.base import BaseTool, ToolInput, ToolOutput
+from app.tools.security import ToolContext
 
 logger = get_logger(__name__)
 
@@ -28,7 +29,11 @@ class DateTimeTool(BaseTool):
     def description(self) -> str:
         return "获取当前日期和时间信息。支持查询当前时间、日期、时区等。"
 
-    async def execute(self, input: ToolInput) -> ToolOutput:
+    async def execute(
+        self,
+        input: ToolInput,
+        context: ToolContext | None = None,
+    ) -> ToolOutput:
         """
         执行日期时间查询。
 
@@ -37,7 +42,15 @@ class DateTimeTool(BaseTool):
         - "date": 仅返回日期
         - "time": 仅返回时间
         - "timestamp": 返回 Unix 时间戳
+
+        Args:
+            input: 工具输入。
+            context: 调用者身份上下文（权限矩阵校验）。
         """
+        auth_error = self._authorize(context)
+        if auth_error:
+            return ToolOutput(success=False, error=auth_error)
+
         try:
             now = datetime.now(timezone.utc)
             query = input.query.strip().lower()
@@ -71,12 +84,24 @@ class CalculatorTool(BaseTool):
     def description(self) -> str:
         return "执行数学计算。输入数学表达式（如 '2 + 3 * 4'），返回计算结果。"
 
-    async def execute(self, input: ToolInput) -> ToolOutput:
+    async def execute(
+        self,
+        input: ToolInput,
+        context: ToolContext | None = None,
+    ) -> ToolOutput:
         """
         执行数学表达式计算。
 
         支持：+, -, *, /, **, (), 基础数学函数。
+
+        Args:
+            input: 工具输入。
+            context: 调用者身份上下文（权限矩阵校验）。
         """
+        auth_error = self._authorize(context)
+        if auth_error:
+            return ToolOutput(success=False, error=auth_error)
+
         try:
             expression = input.query.strip()
             if not expression:

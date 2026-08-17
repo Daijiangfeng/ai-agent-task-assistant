@@ -9,7 +9,7 @@
 - **Goal Understanding** -- 理解用户目标并拆解为可执行子任务
 - **Task Planning** -- 基于 LangGraph 的智能任务规划
 - **Tool Calling** -- 统一的工具调用框架
-- **Memory Management** -- 短期记忆 (Redis，降级内存) + 长期记忆 (Chroma 向量库)
+- **Memory Management** -- 短期记忆 (Redis，降级内存；模块已实现并通过测试，当前未接入业务链路) + 长期记忆 (Chroma 向量库，由 ENABLE_LONG_TERM_MEMORY 门控生效)
 - **RAG Knowledge Retrieval** -- 文档解析 + 智谱 Embedding + Chroma 检索增强生成
 - **Reflection Optimization** -- 执行结果自检与自动重新规划
 - **Web UI** -- Apple 风格前端控制台：任务创建/进度轮询、知识库管理、Agent 执行阶段可视化监控
@@ -22,10 +22,10 @@
 | FastAPI | Web API 框架 |
 | LangGraph | Agent 状态机和工作流编排 |
 | LangChain | LLM 调用链和工具集成 |
-| 智谱 GLM | 大语言模型（OpenAI Compatible API） |
+| 智谱 GLM | 大语言模型（Anthropic 兼容端点） |
 | 智谱 embedding-3 | 文本向量化（Memory / RAG 共用） |
-| PostgreSQL | 持久化存储（任务、计划） |
-| Redis | 会话缓存和短期记忆（连接失败自动降级内存） |
+| PostgreSQL | 持久化存储（预留；当前任务为内存存储） |
+| Redis | 会话缓存和短期记忆（连接失败自动降级内存；短期记忆模块已实现并通过测试，当前未接入业务链路，业务中仅长期记忆由 ENABLE_LONG_TERM_MEMORY 门控生效） |
 | Chroma | 向量数据库（RAG 检索 + 长期记忆，进程内持久化） |
 | Tavily | 联网 Web 搜索（可选，需 API Key） |
 | React 18 + Vite + TypeScript | 前端单页应用（SPA） |
@@ -68,10 +68,10 @@ LangGraph Workflow
 | Agent | `app/agent/` | LangGraph 状态机、Planner/Executor/Reflection 节点与 workflow 构建 |
 | LLM | `app/llm/` | LLM Provider 抽象层、智谱 GLM 接入、Embedding 工厂 |
 | Tools | `app/tools/` | 工具调用框架（抽象基类 + 注册表 + 内置工具） |
-| Memory | `app/memory/` | 记忆系统：Redis 短期记忆（内存降级）+ Chroma 长期记忆 + 工厂 |
-| RAG | `app/rag/` | RAG：文档加载/分块/向量化/索引/检索/重排 + 服务门面 |
-| Models | `app/models/` | Pydantic 数据模型 |
-| Services | `app/services/` | 业务逻辑层（任务管理、Agent 执行） |
+| Memory | `app/memory/` | 记忆系统：Redis 短期记忆（内存降级）+ 长期记忆（向量库，按 user_id/tenant_id 隔离）+ 工厂 |
+| RAG | `app/rag/` | RAG：文档加载/分块/向量化/索引/检索/重排 + 可插拔向量库（chroma/pgvector） |
+| Models | `app/models/` | Pydantic 数据模型 + SQLAlchemy ORM（任务持久化） |
+| Services | `app/services/` | 业务逻辑层（任务管理：内存/PostgreSQL/SQLite 可插拔仓库、Agent 执行 + Checkpoint） |
 | API | `app/api/` | FastAPI 路由（tasks/agent/knowledge/stats/tools）+ 全局异常处理 + CORS |
 | Prompts | `app/prompts/` | Prompt 模板集中管理 |
 | Config | `app/config/` | 配置管理、数据库连接、日志 |
@@ -101,17 +101,27 @@ START --> [Planner] --> [Executor] --> [Reflection]
 ```
 [Memory]
   短期记忆: save/get/delete/search --> Redis (stm:*) --(连接失败)--> InMemory 降级
-  长期记忆: save/search --> 智谱 embedding-3 --> Chroma(collection=long_term_memory)
-            AgentService 任务开始时 recall 注入 context，完成后 remember 写回
-            （由 ENABLE_LONG_TERM_MEMORY 开关控制）
+            （模块已实现并通过测试，但当前未接入业务链路）
+  长期记忆: save/search --> 智谱 embedding-3 --> 向量库(collection=long_term_memory)
+            ★ 数据隔离：每条记忆元数据携带 user_id/tenant_id/namespace，
+              记录 ID 复合为 tenant:user:key，查询/读取/删除强制按作用域过滤，
+              用户 A 的记忆不会被用户 B 召回（默认作用域 anonymous/default）
+            AgentService 任务开始时 recall（限定调用者作用域）注入 context，
+            完成后 remember 写回（由 ENABLE_LONG_TERM_MEMORY 开关控制）
 
 [RAG]
   ingest: 文件 --> DocumentLoader(PDF/DOCX/TXT/MD) --> TextSplitter(分块)
-          --> 智谱 embedding-3 --> Chroma(collection=rag_documents)
-  search: query --> embed --> Chroma 向量召回(cosine, RETRIEVAL_TOP_K)
+          --> 智谱 embedding-3 --> 向量库(collection=rag_documents)
+  search: query --> embed --> 向量召回(cosine, RETRIEVAL_TOP_K)
           --(ENABLE_RERANK=true)--> 智谱 Rerank 精排(阈值过滤) --> Top-K 相关片段
           --(关闭或 rerank 失败回退)--> 向量序 Top-K 相关片段
           RAGRetrievalTool / POST /knowledge/search 均复用此链路
+
+[持久化]
+  任务: TaskService --> 仓库层（memory | sqlite | PostgreSQL+SQLAlchemy Async，
+        TASK_STORAGE_BACKEND=auto 时 PostgreSQL 优先、失败降级内存）
+  执行检查点: LangGraph checkpointer（thread_id=task_id）--> PostgresSaver |
+        MemorySaver（CHECKPOINT_BACKEND=auto 时 PostgreSQL 优先、失败降级内存）
 ```
 
 ### 内置工具
@@ -145,14 +155,30 @@ API 层集成了 `ErrorHandlerMiddleware` 全局异常处理中间件：
 ### 环境要求
 
 - Python 3.11+
-- PostgreSQL（可选，当前使用内存存储）
+- PostgreSQL（可选）：任务持久化（TASK_STORAGE_BACKEND=auto/postgres）、
+  LangGraph Checkpoint（CHECKPOINT_BACKEND=auto/postgres）、pgvector 向量库后端均可用；
+  未配置时任务/检查点自动降级为进程内存，适合开发。
 - Redis（可选，连接失败时短期记忆自动降级为进程内存）
-- Chroma（进程内持久化，无需外部服务）
+- Chroma（进程内持久化，无需外部服务；生产多实例部署建议切换 pgvector）
 - Tavily API Key（可选，启用 Web 搜索工具时需要）
 
 > 依赖说明：`chromadb`、`tavily-python`、`pypdf`、`python-docx` 为 Memory/RAG/工具新增依赖，
-> 已列入 `requirements.txt`。`chromadb` 体积较大，首次安装耗时较长。向量库数据目录（`data/chroma`）
-> 与 SQL 沙箱库（`data/sandbox.db`）建议加入 `.gitignore`。
+> 已列入 `requirements.txt`。`chromadb` 体积较大，首次安装耗时较长。向量库数据目录（`data/chroma`）、
+> 任务 sqlite 库（`data/tasks.db`）与 SQL 沙箱库（`data/sandbox.db`）均已加入 `.gitignore`。
+
+### 生产部署建议（多实例 / Kubernetes）
+
+| 能力 | 开发/单机默认 | 生产推荐 | 配置 |
+|------|--------------|----------|------|
+| 任务存储 | 内存（重启丢失） | PostgreSQL（SQLAlchemy Async） | `TASK_STORAGE_BACKEND=auto` 或 `postgres` |
+| 执行状态检查点 | MemorySaver（重启丢失） | PostgreSQL（PostgresSaver） | `CHECKPOINT_BACKEND=auto` 或 `postgres`（`ENABLE_CHECKPOINTING=true`） |
+| 向量库 | Chroma 单机目录（多 Pod 数据竞争） | pgvector（Milvus/Qdrant 同理扩展） | `VECTOR_STORE_BACKEND=pgvector` + `EMBEDDING_DIM` |
+| 长期记忆隔离 | 按 user_id + tenant_id 强过滤 | 同左（metadata 过滤 + 复合 ID） | 内置，无需配置 |
+
+- 多租户隔离内置：任务按 `tenant_id` 隔离，长期记忆写入 `user_id`/`tenant_id` 元数据
+  且查询强制过滤，用户 A 的记忆不会被用户 B 召回。
+- 任务崩溃恢复：`thread_id=task_id` 的检查点 + 同线程重放，服务重启后重新提交执行
+  即从断点继续，不重复执行已完成节点。
 
 ### 安装与启动
 
@@ -445,7 +471,7 @@ curl -X DELETE "http://localhost:8000/api/v1/knowledge/documents?source=docs/han
 ### 可观测性
 
 - **Executor 子任务延迟指标**：每个 task_result 自动记录 `latency_ms`，便于分析执行瓶颈
-- **CI 安全扫描**：GitHub Actions 新增 `pip-audit` job 检测依赖漏洞
+- **CI 安全扫描**：GitHub Actions 新增 `pip-audit` job 检测依赖漏洞，带 `--ignore-vuln PYSEC-2026-311` 豁免项（chromadb 相关漏洞：本项目未使用 trust_remote_code、内嵌使用未暴露服务端点、官方暂无修复版本，理由见 `.github/workflows/ci.yml` 注释）
 
 ### 可选依赖
 
@@ -680,5 +706,5 @@ ai-agent-task-assistant/
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `localhost` / `5432` / `agent_db` / `postgres` / (空) | PostgreSQL 连接（任务持久化预留，当前任务使用内存存储；提供 `postgres_dsn` / `postgres_async_dsn`） |
-| `RABBITMQ_HOST` / `RABBITMQ_PORT` / `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `localhost` / `5672` / `guest` / `guest` | RabbitMQ 消息队列（分布式任务调度预留；提供 `rabbitmq_url`） |
-| `MILVUS_HOST` / `MILVUS_PORT` | `localhost` / `19530` | Milvus 向量库（备选向量存储预留，当前使用 Chroma） |
+
+> RabbitMQ（分布式任务调度）与 Milvus（备选向量存储）为后续规划项，尚未在 `app/config/settings.py` 中定义，无对应配置项。

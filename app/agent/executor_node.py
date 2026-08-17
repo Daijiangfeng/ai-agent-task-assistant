@@ -15,7 +15,15 @@ from app.agent.state import AgentState
 from app.config.logging import get_logger
 from app.llm.base import BaseLLMProvider
 from app.prompts.manager import PromptManager
+from app.tools.base import ToolInput
 from app.tools.registry import ToolRegistry
+from app.tools.security import (
+    CATEGORY_SYSTEM,
+    ROLE_ADMIN,
+    TOOL_CATEGORIES,
+    ToolContext,
+    is_role_allowed,
+)
 
 logger = get_logger(__name__)
 
@@ -25,10 +33,12 @@ ApprovalHook = Callable[[str, dict[str, Any]], bool]
 
 class ToolExecutionPolicy:
     """
-    智能体层工具执行边界（最小化）。
+    智能体层工具执行边界（最小化 + 权限矩阵）。
 
     职责：
     - 显式白名单：仅允许已登记（注册在案）的工具被调用，未登记工具名默认拒绝。
+    - 角色权限矩阵：按调用者角色（guest/user/admin）与工具类别（sql/file/network
+      等）校验授权，"已注册"不等于"允许"。
     - 副作用工具审批：sql_query / file_processing / web_search 在执行前经过
       一个"可拒绝"的审批钩子，钩子返回 False 或抛异常时拒绝执行。
     - 不改变各工具内部既有的安全校验，仅在调用链上追加一层拦截。
@@ -43,15 +53,27 @@ class ToolExecutionPolicy:
         self,
         allowed_tools: Iterable[str],
         approval_hook: ApprovalHook | None = None,
+        context: ToolContext | None = None,
     ) -> None:
         """
         Args:
             allowed_tools: 允许调用的工具名白名单（通常为已注册工具集合）。
             approval_hook: 副作用工具的审批钩子；缺省放行，可注入以实现拒绝。
+            context: 调用者身份上下文；缺省按 admin 处理（内部调用）。
         """
         self._allowed: set[str] = set(allowed_tools)
         # 默认放行，但保留可注入的"可拒绝"钩子。
         self._approval_hook: ApprovalHook = approval_hook or (lambda name, args: True)
+        # 缺省视为内部调用（admin），外部调用必须显式携带身份。
+        self._context: ToolContext = context or ToolContext(role=ROLE_ADMIN)
+
+    def _role_allows(self, tool_name: str) -> bool:
+        """按权限矩阵判断当前角色是否有权访问该工具类别。"""
+        base = ToolRegistry.get(tool_name)
+        category = base.category if base is not None else TOOL_CATEGORIES.get(
+            tool_name, CATEGORY_SYSTEM
+        )
+        return is_role_allowed(self._context.role, category)
 
     def check(self, tool_name: str, tool_args: dict[str, Any]) -> tuple[bool, str | None]:
         """
@@ -66,6 +88,12 @@ class ToolExecutionPolicy:
         """
         if tool_name not in self._allowed:
             return False, f"工具未登记在白名单中，默认拒绝: {tool_name}"
+
+        if not self._role_allows(tool_name):
+            return (
+                False,
+                f"当前角色 '{self._context.role}' 无权调用工具 {tool_name}",
+            )
 
         if tool_name in self.SIDE_EFFECT_TOOLS:
             try:
@@ -146,9 +174,12 @@ class ExecutorNode:
             task_id=subtask.get("id", "unknown"),
         )
 
+        tool_context = ToolContext.from_dict(state.get("tool_context"))
         t0 = time.perf_counter()
         try:
-            task_result = await self._execute_single_subtask(idx, subtask, state["task_results"])
+            task_result = await self._execute_single_subtask(
+                idx, subtask, state["task_results"], tool_context
+            )
         except Exception as e:
             logger.error("Executor: 子任务执行失败", error=str(e), index=idx)
             task_result = {
@@ -187,9 +218,19 @@ class ExecutorNode:
             }
 
     async def _execute_single_subtask(
-        self, task_idx: int, subtask: dict, task_results: list[dict]
+        self,
+        task_idx: int,
+        subtask: dict,
+        task_results: list[dict],
+        tool_context: ToolContext,
     ) -> dict[str, Any]:
         """执行单个子任务的核心逻辑，供串行和并行路径共用。
+
+        Args:
+            task_idx: 子任务索引。
+            subtask: 子任务字典。
+            task_results: 已完成子任务结果列表。
+            tool_context: 调用者身份上下文（权限矩阵 + 审计）。
 
         Returns:
             成功时返回含 result/status='completed'/latency_ms 的字典。
@@ -212,7 +253,7 @@ class ExecutorNode:
             response = await llm_with_tools.ainvoke(messages)
             if response.tool_calls:
                 result_content = await self._execute_tool_calls(
-                    response, tools, messages, llm_with_tools
+                    response, tools, messages, llm_with_tools, tool_context
                 )
             else:
                 result_content = response.content
@@ -230,20 +271,30 @@ class ExecutorNode:
         }
 
     async def _execute_tool_calls(
-        self, response, tools: list, messages: list, llm_with_tools
+        self,
+        response,
+        tools: list,
+        messages: list,
+        llm_with_tools,
+        tool_context: ToolContext | None = None,
     ) -> str:
         """处理工具调用链。
 
-        在此追加智能体层执行边界：未登记工具名默认拒绝，副作用工具须经审批钩子放行。
-        被拒绝的调用不会触达工具实现，仅记录原因并回填一条拒绝说明给 LLM。
+        在此追加智能体层执行边界：未登记工具名默认拒绝，越权工具（角色权限
+        矩阵）拒绝，副作用工具须经审批钩子放行。被拒绝的调用不会触达工具
+        实现，仅记录原因并回填一条拒绝说明给 LLM。工具执行携带调用者身份
+        （ToolContext），供工具层权限校验与审计。
         """
         from langchain_core.messages import ToolMessage
 
         tool_map = {t.name: t for t in tools}
+        # 缺省视为内部调用（admin）；外部调用必须显式携带身份。
+        context = tool_context or ToolContext(role=ROLE_ADMIN)
         # 白名单即当前已登记（注册在案）的工具集合。
         policy = ToolExecutionPolicy(
             allowed_tools=tool_map.keys(),
             approval_hook=self._tool_approval_hook,
+            context=context,
         )
         all_messages = list(messages) + [response]
 
@@ -257,6 +308,8 @@ class ExecutorNode:
                     "Executor: 工具调用被执行边界拒绝",
                     tool=tool_name,
                     reason=reason,
+                    user_id=context.user_id,
+                    role=context.role,
                 )
                 all_messages.append(
                     ToolMessage(
@@ -267,11 +320,11 @@ class ExecutorNode:
                 continue
 
             try:
-                tool_result = await self._invoke_with_retry(
-                    tool_map[tool_name], tool_args
+                tool_result = await self._invoke_tool(
+                    tool_name, tool_map, tool_args, context
                 )
                 all_messages.append(
-                    ToolMessage(content=str(tool_result), tool_call_id=tool_call["id"])
+                    ToolMessage(content=tool_result, tool_call_id=tool_call["id"])
                 )
             except Exception as e:
                 all_messages.append(
@@ -285,10 +338,43 @@ class ExecutorNode:
         final_response = await llm_with_tools.ainvoke(all_messages)
         return final_response.content
 
+    async def _invoke_tool(
+        self,
+        tool_name: str,
+        tool_map: dict,
+        tool_args: dict[str, Any],
+        context: ToolContext,
+    ) -> str:
+        """
+        执行单个工具调用并返回文本结果。
+
+        优先走 ToolRegistry 中的 BaseTool（可携带 ToolContext 身份）；
+        未注册的测试替身等对象回退到 LangChain ainvoke 接口。
+        """
+        base_tool = ToolRegistry.get(tool_name)
+        if base_tool is not None:
+            result = await self._invoke_with_retry(
+                lambda: base_tool.execute(
+                    ToolInput(
+                        query=tool_args.get("query", ""),
+                        parameters=tool_args.get("parameters", {}),
+                    ),
+                    context=context,
+                )
+            )
+            if result.success:
+                return str(result.data)
+            return f"工具执行失败: {result.error}"
+        return str(
+            await self._invoke_with_retry(
+                lambda: tool_map[tool_name].ainvoke(tool_args)
+            )
+        )
+
     async def _invoke_with_retry(
-        self, tool, tool_args: dict[str, Any], max_retries: int = 2
+        self, call: Callable, max_retries: int = 2
     ) -> Any:
-        """调用工具并对瞬时错误进行有限重试。
+        """调用可重试的可执行对象，并对瞬时错误进行有限重试。
 
         对网络超时、连接错误等瞬时性异常自动重试最多 max_retries 次，
         使用指数退避（1s, 2s）。非瞬时错误（如参数错误）直接抛出。
@@ -298,7 +384,7 @@ class ExecutorNode:
         last_exc: Exception | None = None
         for attempt in range(max_retries + 1):
             try:
-                return await tool.ainvoke(tool_args)
+                return await call()
             except Exception as e:
                 error_str = str(e).lower()
                 # 判断是否为可重试的瞬时错误
@@ -313,7 +399,6 @@ class ExecutorNode:
                 logger.warning(
                     "Executor: 工具调用瞬时失败，%0.1fs后重试",
                     delay,
-                    tool=tool.name if hasattr(tool, 'name') else '?',
                     attempt=attempt + 1,
                     error=str(e),
                 )
@@ -385,8 +470,11 @@ class ExecutorNode:
 
         async def _exec_one(task_idx: int) -> dict[str, Any]:
             subtask = subtasks[task_idx]
+            tool_context = ToolContext.from_dict(state.get("tool_context"))
             try:
-                return await self._execute_single_subtask(task_idx, subtask, state["task_results"])
+                return await self._execute_single_subtask(
+                    task_idx, subtask, state["task_results"], tool_context
+                )
             except Exception as e:
                 return {
                     "subtask_id": subtask.get("id", f"task_{task_idx}"),

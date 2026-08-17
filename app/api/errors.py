@@ -79,3 +79,13 @@ class TaskStateException(AppException):
             f"仅 {', '.join(allowed_statuses)} 状态可执行此操作",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class TaskForbiddenException(AppException):
+    """无权访问他人任务（资源所有权校验失败）。"""
+
+    def __init__(self, task_id: str):
+        super().__init__(
+            message=f"无权访问任务 {task_id}",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )

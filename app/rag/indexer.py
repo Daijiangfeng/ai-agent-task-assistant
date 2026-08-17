@@ -10,7 +10,7 @@ from app.llm.embeddings import BaseEmbeddingProvider
 from app.rag.base import BaseIndexer, Document
 from app.rag.loader import DocumentLoader
 from app.rag.splitter import TextSplitter
-from app.rag.vector_store import ChromaStore
+from app.rag.vector_store import BaseVectorStore
 
 logger = get_logger(__name__)
 
@@ -19,15 +19,15 @@ RAG_COLLECTION = "rag_documents"
 
 class ChromaIndexer(BaseIndexer):
     """
-    Chroma 索引器。
+    文档索引器。
 
-    流程：Document -> split -> embed(智谱) -> Chroma collection `rag_documents`。
+    流程：Document -> split -> embed(智谱) -> 向量库 collection `rag_documents`。
     """
 
     def __init__(
         self,
         embedding_provider: BaseEmbeddingProvider,
-        vector_store: ChromaStore,
+        vector_store: BaseVectorStore,
         splitter: TextSplitter | None = None,
         collection_name: str = RAG_COLLECTION,
     ):

@@ -38,19 +38,46 @@ class InMemoryShortTermMemory(BaseMemory):
             return True
         return False
 
-    async def save(self, key: str, value: Any, ttl: int | None = None) -> None:
+    async def save(
+        self,
+        key: str,
+        value: Any,
+        ttl: int | None = None,
+        *,
+        user_id: str = "anonymous",
+        tenant_id: str = "default",
+    ) -> None:
         expire_at = time.time() + ttl if ttl else None
         self._store[key] = (value, expire_at)
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(
+        self,
+        key: str,
+        *,
+        user_id: str = "anonymous",
+        tenant_id: str = "default",
+    ) -> Optional[Any]:
         if self._is_expired(key):
             return None
         return self._store[key][0]
 
-    async def delete(self, key: str) -> None:
+    async def delete(
+        self,
+        key: str,
+        *,
+        user_id: str = "anonymous",
+        tenant_id: str = "default",
+    ) -> None:
         self._store.pop(key, None)
 
-    async def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+    async def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        *,
+        user_id: str = "anonymous",
+        tenant_id: str = "default",
+    ) -> list[dict[str, Any]]:
         """短期记忆不支持语义搜索，按 key 前缀匹配返回。"""
         results: list[dict[str, Any]] = []
         for key in list(self._store.keys()):
@@ -105,13 +132,27 @@ class RedisShortTermMemory(BaseMemory):
     def _k(self, key: str) -> str:
         return f"{self._prefix}{key}"
 
-    async def save(self, key: str, value: Any, ttl: int | None = None) -> None:
+    async def save(
+        self,
+        key: str,
+        value: Any,
+        ttl: int | None = None,
+        *,
+        user_id: str = "anonymous",
+        tenant_id: str = "default",
+    ) -> None:
         if not await self._ensure_connection():
             return await self._fallback.save(key, value, ttl)
         payload = json.dumps(value, ensure_ascii=False, default=str)
         await self._redis.set(self._k(key), payload, ex=ttl)
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(
+        self,
+        key: str,
+        *,
+        user_id: str = "anonymous",
+        tenant_id: str = "default",
+    ) -> Optional[Any]:
         if not await self._ensure_connection():
             return await self._fallback.get(key)
         raw = await self._redis.get(self._k(key))
@@ -122,12 +163,25 @@ class RedisShortTermMemory(BaseMemory):
         except json.JSONDecodeError:
             return raw
 
-    async def delete(self, key: str) -> None:
+    async def delete(
+        self,
+        key: str,
+        *,
+        user_id: str = "anonymous",
+        tenant_id: str = "default",
+    ) -> None:
         if not await self._ensure_connection():
             return await self._fallback.delete(key)
         await self._redis.delete(self._k(key))
 
-    async def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+    async def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        *,
+        user_id: str = "anonymous",
+        tenant_id: str = "default",
+    ) -> list[dict[str, Any]]:
         """按 key 模式扫描匹配（短期记忆不做语义检索）。"""
         if not await self._ensure_connection():
             return await self._fallback.search(query, top_k)

@@ -23,6 +23,9 @@ class AgentState(TypedDict):
     goal: str  # 用户原始目标
     context: Optional[str]  # 附加上下文
 
+    # ---- 身份 ----
+    tool_context: Optional[dict[str, Any]]  # 工具调用身份（ToolContext.to_dict()）
+
     # ---- 计划 ----
     plan: Optional[dict[str, Any]]  # 当前计划（JSON 结构）
     plan_version: int  # 计划版本号

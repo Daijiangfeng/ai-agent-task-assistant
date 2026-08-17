@@ -5,8 +5,9 @@
 
 from fastapi import APIRouter, Depends, Query
 
+from app.api.auth import can_access_task, get_current_user
 from app.api.deps import get_task_service
-from app.api.errors import TaskNotFoundException
+from app.api.errors import TaskForbiddenException, TaskNotFoundException
 from app.models.api_schemas import (
     CreateTaskRequest,
     TaskListResponse,
@@ -14,6 +15,7 @@ from app.models.api_schemas import (
     TaskStatusResponse,
 )
 from app.services.task_service import TaskService
+from app.tools.security import ROLE_ADMIN, ToolContext
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -22,6 +24,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 async def create_task(
     request: CreateTaskRequest,
     task_service: TaskService = Depends(get_task_service),
+    user: ToolContext = Depends(get_current_user),
 ):
     """
     创建新的 Agent 任务。
@@ -32,6 +35,8 @@ async def create_task(
     task_id = await task_service.create_task(
         goal=request.goal,
         context=request.context,
+        owner_id=user.user_id,
+        tenant_id=user.tenant_id,
     )
     task = await task_service.get_task(task_id)
     return await task_service.to_task_response(task)
@@ -42,10 +47,17 @@ async def list_tasks(
     limit: int = Query(default=20, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
     task_service: TaskService = Depends(get_task_service),
+    user: ToolContext = Depends(get_current_user),
 ):
-    """列表查询任务。"""
-    tasks = await task_service.list_tasks(limit=limit, offset=offset)
-    total = await task_service.get_task_count()
+    """列表查询任务（默认仅返回本人任务，admin 返回全部）。"""
+    owner_id = None if user.role == ROLE_ADMIN else user.user_id
+    tenant_id = None if user.role == ROLE_ADMIN else user.tenant_id
+    tasks = await task_service.list_tasks(
+        limit=limit, offset=offset, owner_id=owner_id, tenant_id=tenant_id
+    )
+    total = await task_service.get_task_count(
+        owner_id=owner_id, tenant_id=tenant_id
+    )
 
     task_responses = [
         await task_service.to_task_response(t) for t in tasks
@@ -58,12 +70,19 @@ async def list_tasks(
 async def get_task_status(
     task_id: str,
     task_service: TaskService = Depends(get_task_service),
+    user: ToolContext = Depends(get_current_user),
 ):
     """
     查询任务执行状态和进度。
 
     返回任务当前状态、进度百分比、当前步骤等信息。
     """
+    task = await task_service.get_task(task_id)
+    if task is None:
+        raise TaskNotFoundException(task_id)
+    if not can_access_task(task, user):
+        raise TaskForbiddenException(task_id)
+
     response = await task_service.get_task_status_response(task_id)
     if response is None:
         raise TaskNotFoundException(task_id)

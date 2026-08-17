@@ -7,7 +7,7 @@ from app.rag.reranker import RerankError, ZhipuReranker
 from app.rag.retriever import ChromaRetriever
 from app.rag.service import RAGService
 from app.rag.splitter import TextSplitter
-from app.rag.vector_store import ChromaStore
+from app.rag.vector_store import BaseVectorStore, ChromaStore, create_vector_store
 
 __all__ = [
     "BaseRetriever",
@@ -16,7 +16,9 @@ __all__ = [
     "Document",
     "DocumentLoader",
     "TextSplitter",
+    "BaseVectorStore",
     "ChromaStore",
+    "create_vector_store",
     "ChromaIndexer",
     "ChromaRetriever",
     "ZhipuReranker",

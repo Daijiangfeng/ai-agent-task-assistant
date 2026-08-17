@@ -47,6 +47,12 @@ class Task(BaseModel):
     id: str = Field(description="任务唯一标识")
     goal: str = Field(description="用户目标描述")
     context: str | None = Field(default=None, description="附加上下文信息")
+    owner_id: str = Field(
+        default="anonymous", description="任务所有者（创建者）用户 ID"
+    )
+    tenant_id: str = Field(
+        default="default", description="任务所属租户 ID（多租户数据隔离维度）"
+    )
     status: TaskStatus = Field(default=TaskStatus.PENDING, description="任务状态")
     subtasks: list[SubTask] = Field(default_factory=list, description="子任务列表")
     plan: Plan | None = Field(default=None, description="执行计划（Planner 生成）")

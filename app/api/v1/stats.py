@@ -5,6 +5,7 @@
 
 from fastapi import APIRouter, Depends
 
+from app.api.auth import get_current_user
 from app.api.deps import get_rag_service, get_task_service
 from app.config.logging import get_logger
 from app.config.settings import get_settings
@@ -12,6 +13,7 @@ from app.models.api_schemas import StatsResponse
 from app.rag.service import RAGService
 from app.services.task_service import TaskService
 from app.tools.registry import ToolRegistry
+from app.tools.security import ToolContext
 
 logger = get_logger(__name__)
 
@@ -22,6 +24,7 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 async def get_stats(
     task_service: TaskService = Depends(get_task_service),
     rag_service: RAGService = Depends(get_rag_service),
+    user: ToolContext = Depends(get_current_user),
 ):
     """返回系统概览统计：任务分布、工具数、知识库规模。"""
     settings = get_settings()

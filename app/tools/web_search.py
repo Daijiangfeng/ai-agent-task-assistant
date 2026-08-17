@@ -8,6 +8,7 @@ from __future__ import annotations
 from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
 from app.tools.base import BaseTool, ToolInput, ToolOutput
+from app.tools.security import CATEGORY_NETWORK, ToolContext
 
 logger = get_logger(__name__)
 
@@ -23,6 +24,8 @@ class WebSearchTool(BaseTool):
     def __init__(self, settings: Settings | None = None):
         self._settings = settings or get_settings()
 
+    category: str = CATEGORY_NETWORK
+
     @property
     def name(self) -> str:
         return "web_search"
@@ -34,16 +37,25 @@ class WebSearchTool(BaseTool):
             "摘要和链接。适合查询最新新闻、事实性信息等。"
         )
 
-    async def execute(self, input: ToolInput) -> ToolOutput:
+    async def execute(
+        self,
+        input: ToolInput,
+        context: ToolContext | None = None,
+    ) -> ToolOutput:
         """
         执行 Web 搜索。
 
         Args:
             input: query 为搜索关键词。
+            context: 调用者身份上下文（权限矩阵校验）。
 
         Returns:
             ToolOutput：成功时 data 为拼接的结果文本。
         """
+        auth_error = self._authorize(context)
+        if auth_error:
+            return ToolOutput(success=False, error=auth_error)
+
         query = input.query.strip()
         if not query:
             return ToolOutput(success=False, error="搜索关键词为空")

@@ -10,6 +10,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.tools.security import (
+    CATEGORY_SYSTEM,
+    ToolContext,
+    is_role_allowed,
+)
+
 
 class ToolInput(BaseModel):
     """工具输入基类，子类按需扩展。"""
@@ -28,7 +34,32 @@ class BaseTool(ABC):
     """
     工具抽象基类。
     所有工具（Web Search、RAG、SQL Query、File Processing 等）必须继承此类。
+
+    category 声明工具的权限类别（system/rag/sql/file/network），
+    由权限矩阵（app/tools/security.py）按调用者角色决定是否放行。
     """
+
+    category: str = CATEGORY_SYSTEM
+
+    def _authorize(self, context: ToolContext | None) -> str | None:
+        """
+        按调用者角色校验当前工具类别是否允许（权限矩阵）。
+
+        Args:
+            context: 调用者身份上下文。为 None 时视为内部可信调用，放行；
+                外部调用（Agent Executor / API 直调）必须显式携带身份。
+
+        Returns:
+            允许返回 None，否则返回错误消息。
+        """
+        if context is None:
+            return None
+        if not is_role_allowed(context.role, self.category):
+            return (
+                f"当前角色 '{context.role}' 无权调用工具 {self.name} "
+                f"（类别: {self.category}）"
+            )
+        return None
 
     @property
     @abstractmethod

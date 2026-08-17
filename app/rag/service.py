@@ -17,7 +17,7 @@ from app.rag.indexer import RAG_COLLECTION, ChromaIndexer
 from app.rag.reranker import ZhipuReranker
 from app.rag.retriever import ChromaRetriever
 from app.rag.splitter import TextSplitter
-from app.rag.vector_store import ChromaStore
+from app.rag.vector_store import BaseVectorStore, create_vector_store
 
 logger = get_logger(__name__)
 
@@ -35,14 +35,14 @@ class RAGService:
         self,
         settings: Settings | None = None,
         embedding_provider: BaseEmbeddingProvider | None = None,
-        vector_store: ChromaStore | None = None,
+        vector_store: BaseVectorStore | None = None,
         reranker: BaseReranker | None = None,
     ):
         self._settings = settings or get_settings()
         self._embedding = embedding_provider or create_embedding_provider(
             self._settings
         )
-        self._store = vector_store or ChromaStore(self._settings.chroma_dir)
+        self._store = vector_store or create_vector_store(self._settings)
         splitter = TextSplitter(self._settings)
         self._indexer = ChromaIndexer(self._embedding, self._store, splitter)
         self._retriever = ChromaRetriever(self._embedding, self._store)

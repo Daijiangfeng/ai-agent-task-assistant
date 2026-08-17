@@ -141,7 +141,8 @@ class FakeChatModel(Runnable):
             return AIMessage(content=json.dumps(self._plan, ensure_ascii=False))
 
         # Executor 第一轮：仅解析“当前子任务”段落，避免匹配到之前任务描述里的工具名
-        tail = text.split("当前子任务")[-1] if "当前子任务" in text else text
+        tail = text.split("## 当前子任务")[-1] if "## 当前子任务" in text else text
+        tail = tail.split("## 之前任务的执行结果")[0]
         for name in TOOL_NAMES:
             if name in tail:
                 return AIMessage(
@@ -183,9 +184,9 @@ def _install_spy(tool):
     original = tool.execute
     calls: list[str] = []
 
-    async def spy(input: ToolInput):
+    async def spy(input: ToolInput, **kwargs):
         calls.append(input.query)
-        return await original(input)
+        return await original(input, **kwargs)
 
     tool.execute = spy  # type: ignore[assignment]
     return calls
@@ -274,8 +275,10 @@ def integration_env(tmp_path, temp_chroma_dir, mock_embedding_provider, monkeypa
     # Workflow 各节点依赖 PromptManager 中已注册的模板
     PromptManager.init_defaults()
 
-    task_service = TaskService()
-    agent_settings = Settings(ENABLE_LONG_TERM_MEMORY=True)
+    task_service = TaskService(Settings(TASK_STORAGE_BACKEND="memory"))
+    agent_settings = Settings(
+        ENABLE_LONG_TERM_MEMORY=True, CHECKPOINT_BACKEND="memory"
+    )
     service = AgentService(
         task_service=task_service,
         settings=agent_settings,
@@ -392,10 +395,12 @@ class TestAgentIntegration:
         PromptManager.init_defaults()
 
         # 无工具注册也应能跑通（Executor 无工具时直接调用 LLM）
-        task_service = TaskService()
+        task_service = TaskService(Settings(TASK_STORAGE_BACKEND="memory"))
         service = AgentService(
             task_service=task_service,
-            settings=Settings(ENABLE_LONG_TERM_MEMORY=False),
+            settings=Settings(
+                ENABLE_LONG_TERM_MEMORY=False, CHECKPOINT_BACKEND="memory"
+            ),
         )
 
         task_id = await task_service.create_task(GOAL)

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from app.api.auth import get_current_user, require_non_guest
 from app.api.deps import get_rag_service
 from app.config.logging import get_logger
 from app.models.api_schemas import (
@@ -22,6 +23,7 @@ from app.models.api_schemas import (
     KnowledgeSearchResult,
 )
 from app.rag.service import RAGService
+from app.tools.security import ToolContext
 
 logger = get_logger(__name__)
 
@@ -32,6 +34,7 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 async def ingest_document(
     request: IngestDocumentRequest,
     rag_service: RAGService = Depends(get_rag_service),
+    user: ToolContext = Depends(require_non_guest),
 ):
     """
     将本地文件加载、分块、向量化并索引到知识库。
@@ -58,6 +61,7 @@ async def ingest_document(
 async def upload_document(
     file: UploadFile = File(...),
     rag_service: RAGService = Depends(get_rag_service),
+    user: ToolContext = Depends(require_non_guest),
 ):
     """
     上传本地文件并索引到知识库。
@@ -96,6 +100,7 @@ async def upload_document(
 @router.get("/documents", response_model=DocumentListResponse)
 async def list_documents(
     rag_service: RAGService = Depends(get_rag_service),
+    user: ToolContext = Depends(get_current_user),
 ):
     """列出知识库中已索引的文档（按来源聚合，含分块数）。"""
     try:
@@ -118,6 +123,7 @@ async def list_documents(
 async def delete_document(
     source: str,
     rag_service: RAGService = Depends(get_rag_service),
+    user: ToolContext = Depends(require_non_guest),
 ):
     """按来源删除知识库中的一个文档（其所有分块）。
 
@@ -137,6 +143,7 @@ async def delete_document(
 async def search_knowledge(
     request: KnowledgeSearchRequest,
     rag_service: RAGService = Depends(get_rag_service),
+    user: ToolContext = Depends(get_current_user),
 ):
     """
     在知识库中做语义检索，返回最相关的文档片段。
