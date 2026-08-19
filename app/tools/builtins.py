@@ -3,6 +3,7 @@
 提供开箱即用的基础工具实现。
 """
 
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -82,7 +83,7 @@ class CalculatorTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "执行数学计算。输入数学表达式（如 '2 + 3 * 4'），返回计算结果。"
+        return "执行数学计算。输入数学表达式（如 \'2 + 3 * 4\'），返回计算结果。"
 
     async def execute(
         self,
@@ -131,10 +132,9 @@ def register_builtin_tools() -> None:
     基础工具（DateTime/Calculator）始终注册；
     真实工具按依赖/配置条件注册：
     - web_search: 仅当配置了 TAVILY_API_KEY
-    - sql_query / file_processing / rag_retrieval: 无外部 Key 依赖，始终注册
+    - sql_query / file_processing: 无外部 Key 依赖，始终注册
     """
     from app.tools.file_processing import FileProcessingTool
-    from app.tools.rag_tool import RAGRetrievalTool
     from app.tools.registry import ToolRegistry
     from app.tools.sql_query import SQLQueryTool
     from app.tools.web_search import WebSearchTool
@@ -150,9 +150,6 @@ def register_builtin_tools() -> None:
 
     # 文件处理（本地解析，无外部依赖）
     ToolRegistry.register(FileProcessingTool(settings))
-
-    # RAG 知识库检索
-    ToolRegistry.register(RAGRetrievalTool(settings))
 
     # Web 搜索：仅在配置了 Tavily API Key 时注册
     if settings.TAVILY_API_KEY:
@@ -191,7 +188,14 @@ def register_five_category_tools(settings: Settings | None = None) -> None:
     ToolRegistry.register(DataTransformTool())
     # Act
     ToolRegistry.register(HTTPActionTool(settings))
-    ToolRegistry.register(EmailTool())
+    if settings.is_production:
+        # 生产禁止 Mock 工具降级：email.send 当前为内存通道（不真实外发），
+        # 注册会让 Agent 误以为邮件已发送；接入真实 SMTP Provider 后方可启用
+        logger.warning(
+            "生产环境跳过 email.send 注册（当前实现为内存 Mock 通道）"
+        )
+    else:
+        ToolRegistry.register(EmailTool())
     ToolRegistry.register(DatabaseWriteTool(settings))
     ToolRegistry.register(GitHubCreatePRTool())
     # Remember

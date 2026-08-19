@@ -1,6 +1,6 @@
 """
 文件处理工具。
-复用 RAG 文档加载器解析本地文件，返回文本内容摘要，含路径安全校验。
+使用文件加载器解析本地文件（PDF/DOCX/TXT/MD），返回文本内容摘要，含路径安全校验。
 
 安全设计（纵深防御）：
 - 路径限制：resolve() 后校验必须位于项目根目录内，防止 ../ 路径穿越与符号链接逃逸
@@ -15,8 +15,8 @@ from pathlib import Path
 
 from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
-from app.rag.loader import SUPPORTED_EXTENSIONS, DocumentLoader
 from app.tools.base import BaseTool, ToolInput, ToolOutput
+from app.tools.file_loader import SUPPORTED_EXTENSIONS, DocumentLoader
 from app.tools.security import CATEGORY_FILE, ToolContext
 
 logger = get_logger(__name__)
