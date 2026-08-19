@@ -73,64 +73,31 @@ class HealthResponse(BaseModel):
     version: str = Field(description="应用版本号")
 
 
-class IngestDocumentRequest(BaseModel):
-    """文档入库请求体。"""
+class LivenessResponse(BaseModel):
+    """存活探针响应体（进程存活即 alive，不依赖外部基础设施）。"""
 
-    file_path: str = Field(min_length=1, description="待索引的文件路径")
-
-
-class IngestDocumentResponse(BaseModel):
-    """文档入库响应体。"""
-
-    source: str = Field(description="文档来源路径")
-    chunks_indexed: int = Field(description="已索引的分块数量")
+    status: str = "alive"
+    version: str = Field(description="应用版本号")
 
 
-class KnowledgeSearchRequest(BaseModel):
-    """知识库检索请求体。"""
+class ComponentStatusSchema(BaseModel):
+    """单组件健康状态。"""
 
-    query: str = Field(min_length=1, max_length=5000, description="检索查询文本")
-    top_k: int | None = Field(default=None, ge=1, le=50, description="返回数量")
-
-
-class KnowledgeSearchResult(BaseModel):
-    """单条知识检索结果。"""
-
-    content: str = Field(description="文档片段内容")
-    metadata: dict = Field(default_factory=dict, description="元数据")
-    score: float | None = Field(default=None, description="相关度分数")
-    rerank_score: float | None = Field(
-        default=None, description="Rerank 精排相关性分数（启用 rerank 时提供）"
-    )
+    name: str = Field(description="组件名（database/queue/vector_db/llm/storage/checkpoint/redis）")
+    status: str = Field(description="up | down | skipped")
+    detail: str = Field(default="", description="状态说明")
+    latency_ms: float = Field(default=0.0, description="探测耗时（毫秒）")
+    core: bool = Field(default=True, description="是否核心组件（down 时阻断就绪）")
 
 
-class KnowledgeSearchResponse(BaseModel):
-    """知识库检索响应体。"""
+class ReadinessResponse(BaseModel):
+    """就绪探针响应体（核心基础设施可用才 ready）。"""
 
-    query: str = Field(description="检索查询文本")
-    results: list[KnowledgeSearchResult] = Field(description="检索结果列表")
-
-
-class DocumentInfo(BaseModel):
-    """已索引文档概览（按来源聚合）。"""
-
-    source: str = Field(description="文档来源路径")
-    type: str | None = Field(default=None, description="文档类型")
-    chunk_count: int = Field(description="该文档的分块数")
-
-
-class DocumentListResponse(BaseModel):
-    """已索引文档列表响应体。"""
-
-    total: int = Field(description="文档总数（按来源去重）")
-    documents: list[DocumentInfo] = Field(description="文档列表")
-
-
-class DeleteDocumentResponse(BaseModel):
-    """删除文档响应体。"""
-
-    source: str = Field(description="被删除的文档来源")
-    chunks_deleted: int = Field(description="被删除的分块数")
+    status: str = Field(description="ready | not_ready")
+    ready: bool = Field(description="是否就绪")
+    environment: str = Field(description="运行环境（development/production）")
+    version: str = Field(description="应用版本号")
+    components: list[ComponentStatusSchema] = Field(default_factory=list)
 
 
 class ToolInfo(BaseModel):
@@ -154,8 +121,6 @@ class StatsResponse(BaseModel):
     task_total: int = Field(description="任务总数")
     tasks_by_status: dict[str, int] = Field(description="各状态任务计数")
     tool_count: int = Field(description="已注册工具数")
-    knowledge_document_count: int = Field(description="知识库文档数（按来源去重）")
-    knowledge_chunk_count: int = Field(description="知识库分块总数")
 
 
 # ---------------------------------------------------------------------------
