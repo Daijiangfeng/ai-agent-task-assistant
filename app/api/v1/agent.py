@@ -7,7 +7,7 @@ Agent 执行相关 API 路由。
 from fastapi import APIRouter, Depends
 
 from app.api.auth import can_access_task, get_current_user
-from app.api.deps import get_task_queue, get_task_service
+from app.api.deps import get_task_queue, get_task_service, require_ready
 from app.api.errors import (
     QueueUnavailableException,
     TaskForbiddenException,
@@ -27,7 +27,11 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/tasks", tags=["agent"])
 
 
-@router.post("/{task_id}/execute", response_model=TaskResponse)
+@router.post(
+    "/{task_id}/execute",
+    response_model=TaskResponse,
+    dependencies=[Depends(require_ready)],
+)
 async def execute_task(
     task_id: str,
     task_service: TaskService = Depends(get_task_service),

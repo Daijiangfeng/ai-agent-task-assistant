@@ -101,6 +101,16 @@ class QueueUnavailableException(AppException):
         )
 
 
+class ServiceUnavailableException(AppException):
+    """服务未就绪（生产模式基础设施健康检查未通过，拒绝接收任务）。"""
+
+    def __init__(self, reason: str):
+        super().__init__(
+            message=f"服务未就绪，暂不接受任务: {reason}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
 class ApprovalNotFoundException(AppException):
     """审批请求不存在（任务无对应待审批请求）。"""
 

@@ -7,7 +7,7 @@ Human-in-the-loop 审批决策功能。
 from fastapi import APIRouter, Depends, Query
 
 from app.api.auth import can_access_task, get_current_user
-from app.api.deps import get_task_queue, get_task_service
+from app.api.deps import get_task_queue, get_task_service, require_ready
 from app.api.errors import (
     ApprovalAlreadyDecidedException,
     ApprovalNotFoundException,
@@ -36,7 +36,12 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-@router.post("/", response_model=TaskResponse, status_code=201)
+@router.post(
+    "/",
+    response_model=TaskResponse,
+    status_code=201,
+    dependencies=[Depends(require_ready)],
+)
 async def create_task(
     request: CreateTaskRequest,
     task_service: TaskService = Depends(get_task_service),
@@ -159,7 +164,11 @@ async def pause_task(
     return response
 
 
-@router.post("/{task_id}/resume", response_model=TaskResponse)
+@router.post(
+    "/{task_id}/resume",
+    response_model=TaskResponse,
+    dependencies=[Depends(require_ready)],
+)
 async def resume_task(
     task_id: str,
     task_service: TaskService = Depends(get_task_service),
@@ -254,7 +263,11 @@ async def cancel_task(
     return response
 
 
-@router.post("/{task_id}/retry", response_model=TaskResponse)
+@router.post(
+    "/{task_id}/retry",
+    response_model=TaskResponse,
+    dependencies=[Depends(require_ready)],
+)
 async def retry_task(
     task_id: str,
     request: RetryTaskRequest | None = None,
@@ -335,6 +348,7 @@ async def list_approvals(
 @router.post(
     "/{task_id}/approvals/{approval_id}/approve",
     response_model=TaskStatusResponse,
+    dependencies=[Depends(require_ready)],
 )
 async def approve_approval(
     task_id: str,
@@ -365,6 +379,7 @@ async def approve_approval(
 @router.post(
     "/{task_id}/approvals/{approval_id}/reject",
     response_model=TaskStatusResponse,
+    dependencies=[Depends(require_ready)],
 )
 async def reject_approval(
     task_id: str,
