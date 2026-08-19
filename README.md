@@ -168,7 +168,6 @@ START --> [Supervisor] --multi_agent--> [SubAgents] --> [Reviewer] --> END
 | `WebSearchTool` | `web_search` | Tavily 联网搜索（仅当配置 `TAVILY_API_KEY` 时注册） |
 | `SQLQueryTool` | `sql_query` | SQLite 沙箱只读查询（仅允许 SELECT，含示例数据） |
 | `FileProcessingTool` | `file_processing` | 解析本地 PDF/DOCX/TXT/MD 文件内容（路径受限于项目根） |
-| `RAGRetrievalTool` | `rag_retrieval` | 在已索引知识库中做语义检索 |
 
 **五类能力工具集（Observe/Reason/Act/Remember/Interact，统一 Tool Runtime）：**
 
@@ -673,16 +672,11 @@ pytest tests/test_agent_capabilities.py -v
 | `test_tools.py` | `TestSQLQueryTool` | SQL 沙箱：拒绝非 SELECT/多语句/DROP、正常查询/聚合 |
 | `test_tools.py` | `TestWebSearchTool` | 无 Key 返回失败、空查询校验 |
 | `test_tools.py` | `TestFileProcessingTool` | 读取文件、拒绝越界路径、文件不存在 |
-| `test_tools.py` | `TestRAGRetrievalTool` | mock RAGService 检索拼接、空查询 |
 | `test_memory.py` | `TestInMemoryShortTermMemory` | 内存短期记忆 save/get/delete/ttl/search |
 | `test_memory.py` | `TestRedisShortTermMemoryDegrade` | Redis 不可达时降级内存 |
 | `test_memory.py` | `TestVectorLongTermMemory` | 长期记忆（mock embedding + 临时 Chroma）存取/检索 |
 | `test_memory.py` | `TestMemoryFactory` | 记忆工厂创建 |
-| `test_rag.py` | `TestDocumentLoader` | txt/md 解析、不存在/不支持类型 |
-| `test_rag.py` | `TestTextSplitter` | 分块生成与 chunk_id 唯一性 |
-| `test_rag.py` | `TestIndexerRetriever` | 索引/检索/删除（mock embedding + 临时 Chroma） |
-| `test_rag.py` | `TestRAGService` | 服务门面 ingest + search |
-| `test_integration.py` | `TestAgentIntegration` | Agent 端到端集成：FakeChatModel 驱动 Planner→Executor→Reflection 全流程 + 真实工具链（web_search/sql_query/file_processing/rag_retrieval mock 外部依赖）+ 长期记忆回写 |
+| `test_integration.py` | `TestAgentIntegration` | Agent 端到端集成：FakeChatModel 驱动 Planner→Executor→Reflection 全流程 + 真实工具链（web_search/sql_query/file_processing，mock 外部依赖）+ 长期记忆回写 |
 | `test_new_endpoints.py` | `TestStatsAndToolsAPI` | `/stats` 与 `/tools` 只读接口 |
 | `test_new_endpoints.py` | `TestTaskStateWriteback` | Agent 执行中任务状态实时回写逻辑 |
 | `test_multi_agent.py` | `TestSupervisorNode` / `TestSubAgentsNode` / `TestReviewerNode` | Supervisor 决策与回退、子 Agent 顺序执行/失败不阻断/前序结果传递、Reviewer 合成 |
