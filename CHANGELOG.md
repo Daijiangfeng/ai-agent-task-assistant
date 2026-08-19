@@ -5,6 +5,61 @@
 
 ---
 
+## [文档同步] README/AGENTS 对齐去 RAG 化与生产安全模式（2026-08-20）
+
+### 修改内容
+
+README.md 在「去 RAG 化」与「P0-1 生产安全模式」两轮改造后未同步，本次全面对齐仓库现状：
+
+- **移除全部 RAG/知识库残留文档**：核心能力的 RAG 条目、技术栈 RAG 用途、RAG 模块行、
+  Memory/RAG 数据流中的 RAG 段、知识库 API 5 个示例请求、检索增强（Hybrid+动态分块）章节、
+  13 项 RAG 配置项（RAG_CHUNK_* / HYBRID_* / RERANK_* 等）、test_rag / test_rag_hybrid
+  测试条目、项目结构中的 app/rag/ 与 knowledge.py / rag_tool.py / test.http；
+- **补充生产安全模式文档**：核心能力新增「生产安全模式」条目；架构改进新增
+  「生产安全模式（P0-1）」小节（环境分区/五处禁降级守卫/健康探针/任务门禁）；
+  健康检查示例改为 /health + /health/live + /health/ready 三端点并附响应示例；
+  生产部署建议表新增运行环境与表结构（Alembic）两行及探针接入说明；
+  安装与启动新增生产部署命令（alembic upgrade head + ENVIRONMENT=production）；
+- **补充 Alembic 迁移文档**：架构改进新增「数据库迁移（Alembic）」小节
+  （基线迁移/双路径一致性/stamp 存量库/ASCII 约束）；
+- **补充新能力文档**：执行追踪查询 API（GET /api/v1/traces）示例；配置项新增
+  ENVIRONMENT / HEALTH_CHECK_TIMEOUT / HEALTH_CACHE_TTL；存储表注明 auto 降级仅开发模式生效；
+- **修正过期描述**：PostgreSQL 从「预留」改为已实现（任务持久化/Checkpoint/pgvector）；
+  Chroma 用途改为长期记忆；前端界面从「五大（含知识库）」改为四大；stats 响应去掉知识库计数字段；
+  sqlparse 从「可选依赖」改为已入 requirements（配合 sqlglot）；检查点示例 SqliteSaver → PostgresSaver；
+- **项目结构树重写**：对齐当前目录（新增 api/auth.py、v1/traces.py、config/eventloop.py、
+  llm/budget.py、memory/vector_store*.py、tools/file_loader.py、services/health.py、
+  migrations/、alembic.ini、CHANGELOG.md、docs/architecture_review.md、4 个运维脚本）。
+
+AGENTS.md 小幅同步：API 模块行补 traces 路由与认证；Services 行补 task_repository；
+启动与验证命令补充 4 个运维脚本（list_tasks / clear_tasks / run_cases / run_light_cases）。
+
+### 修改文件
+
+| 类别 | 文件 | 变更 |
+|------|------|------|
+| 文档 | `README.md` | 全文对齐去 RAG 化 + 生产安全模式 + Alembic 现状 |
+| 文档 | `AGENTS.md` | 补 traces 路由 / task_repository / 运维脚本命令 |
+
+### 数据库变化
+
+- 无（纯文档变更）。
+
+### API 变化
+
+- 无（纯文档变更；文档内容对齐既有 API 现状）。
+
+### 测试结果
+
+- 纯文档变更，不涉及代码路径；`git diff` 复核无 RAG/知识库残留引用
+  （grep 验证 RAG|knowledge|知识库|rerank|hybrid|BM25 均无命中）。
+
+### 风险说明
+
+- 无。本次仅修改 README.md / AGENTS.md 两个文档文件，不触碰任何代码与配置。
+
+---
+
 ## [去 RAG 化] 移除 RAG / 知识库能力（2026-08-20）
 
 ### 修改内容

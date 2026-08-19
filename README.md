@@ -1,8 +1,8 @@
 # AI Agent Task Assistant -- 智能任务执行助手
 
-企业级 LLM Agent 全栈应用系统，具备任务规划、工具调用、知识增强、长期记忆和自我反思能力。
+企业级 LLM Agent 全栈应用系统，具备任务规划、工具调用、长期记忆和自我反思能力。
 后端为 Python FastAPI + LangGraph Agent；前端为 React + Vite + TypeScript 单页应用，
-落地 Apple 设计语言，覆盖系统概览、任务控制台、知识库管理与执行监控四大界面。
+落地 Apple 设计语言，覆盖系统概览、任务控制台、任务模板与执行监控四大界面。
 
 ## 核心能力
 
@@ -17,8 +17,7 @@
   高风险调用暂停执行，用户可批准 / 拒绝 / 修改参数后继续；风险阈值可配置（`TOOL_APPROVAL_LEVEL`）
 - **任务生命周期控制** -- 暂停 / 恢复（断点续跑）/ 取消 / 重试（可从失败子任务恢复），基于 LangGraph Checkpoint
 - **任务模板（Agent Skill）** -- 内置市场调研 / 文档分析 / 代码审查 / 通用模板，支持自定义模板与 `{var}` 变量渲染一键建任务
-- **Memory Management** -- 短期记忆 (Redis，降级内存；模块已实现并通过测试，当前未接入业务链路) + 长期记忆 (Chroma 向量库，由 ENABLE_LONG_TERM_MEMORY 门控生效)
-- **RAG Knowledge Retrieval** -- 文档解析 + 智谱 Embedding + Chroma 检索增强生成，支持重排与混合检索（可选，向量 + BM25 RRF）
+- **Memory Management** -- 短期记忆 (Redis，降级内存；模块已实现并通过测试，当前未接入业务链路) + 长期记忆 (Chroma/pgvector 可插拔向量库，由 ENABLE_LONG_TERM_MEMORY 门控生效)
 - **Search Timeliness（搜索时效性）** -- 搜索意图分类（普通知识 / 时效性 / 新闻）+ 来源新鲜度评分 + 进程内缓存与强时效绕过，
   时效性问题优先采用最新检索结果，抑制模型用过时知识覆盖新结果
 - **LLM 成本控制** -- 单任务预算（调用次数 / token / 金额）超限即终止，防止失控消耗
@@ -27,7 +26,11 @@
   提取参数、审批结果、耗时、错误，供调试与审计
 - **Retry / Timeout / Fallback** -- 工具瞬时失败有限重试（指数退避），子 Agent / Reviewer 超时保护，
   失败显式返回并透传给 Reviewer，避免把失败伪装成成功
-- **Web UI** -- Apple 风格前端控制台：任务创建/进度轮询、生命周期控制与审批、知识库管理、任务模板、Agent 执行阶段可视化监控
+- **生产安全模式** -- `ENVIRONMENT=production` 下禁止一切静默降级（内存存储 / MemorySaver / 内存队列 / Mock 工具），
+  启动即执行基础设施健康检查（fail-fast）；`/health/live` 与 `/health/ready` 供编排系统探针，
+  未就绪时任务接收端点返回 503 拒绝
+- **数据库迁移** -- Alembic 管理 `tasks` 表结构演进，开发可 create_all 引导，生产走 `alembic upgrade head`
+- **Web UI** -- Apple 风格前端控制台：任务创建/进度轮询、生命周期控制与审批、任务模板、Agent 执行阶段可视化监控
 
 ## 技术栈
 
@@ -38,10 +41,11 @@
 | LangGraph | Agent 状态机和工作流编排 |
 | LangChain | LLM 调用链和工具集成 |
 | 智谱 GLM | 大语言模型（Anthropic 兼容端点） |
-| 智谱 embedding-3 | 文本向量化（Memory / RAG 共用） |
-| PostgreSQL | 持久化存储（预留；当前任务为内存存储） |
-| Redis | 会话缓存和短期记忆（连接失败自动降级内存；短期记忆模块已实现并通过测试，当前未接入业务链路，业务中仅长期记忆由 ENABLE_LONG_TERM_MEMORY 门控生效） |
-| Chroma | 向量数据库（RAG 检索 + 长期记忆，进程内持久化） |
+| 智谱 embedding-3 | 文本向量化（长期记忆） |
+| PostgreSQL | 任务持久化 / LangGraph Checkpoint / pgvector 向量库（SQLAlchemy Async） |
+| Redis | 任务队列与短期记忆（连接失败自动降级内存；短期记忆模块已实现并通过测试，当前未接入业务链路，业务中仅长期记忆由 ENABLE_LONG_TERM_MEMORY 门控生效） |
+| Chroma | 长期记忆向量数据库（进程内持久化，可切换 pgvector） |
+| Alembic | 数据库结构迁移（基线迁移 + 版本演进） |
 | Tavily | 联网 Web 搜索（可选，需 API Key） |
 | React 18 + Vite + TypeScript | 前端单页应用（SPA） |
 | react-router-dom | 前端路由（四大界面 + 路由级懒加载分包） |
@@ -90,15 +94,14 @@ LangGraph Workflow
 | Queue | `app/queue/` | 任务队列抽象（Redis 可靠队列 / 内存队列，auto 自动降级）+ 内置 Worker（`python -m app.worker`） |
 | LLM | `app/llm/` | LLM Provider 抽象层、智谱 GLM 接入、Embedding 工厂、单任务预算（成本控制） |
 | Tools | `app/tools/` | 工具调用框架（抽象基类 + 注册表 + 内置工具）、统一执行管线（executor.py：校验/权限/审批/超时/重试/规范化/审计）、工具风险分级（risk.py）、搜索时效性（意图/新鲜度/缓存）、执行边界/审批钩子 |
-| Memory | `app/memory/` | 记忆系统：Redis 短期记忆（内存降级）+ 长期记忆（向量库，按 user_id/tenant_id 隔离）+ 工厂 |
-| RAG | `app/rag/` | RAG：文档加载/分块/向量化/索引/检索/重排 + 混合检索（BM25+向量 RRF）+ 可插拔向量库（chroma/pgvector） |
+| Memory | `app/memory/` | 记忆系统：Redis 短期记忆（内存降级）+ 长期记忆（向量库，按 user_id/tenant_id 隔离）+ 可插拔向量存储（Chroma/pgvector）+ 工厂 |
 | Models | `app/models/` | Pydantic 数据模型（含任务模板）+ SQLAlchemy ORM（任务持久化） |
-| Services | `app/services/` | 业务逻辑层（task_service 任务管理、task_control 暂停/取消控制、template_service 模板、agent_service Agent 执行 + 队列消费） |
-| API | `app/api/` | FastAPI 路由（tasks/agent/knowledge/stats/tools/templates）+ 全局异常处理 + CORS |
+| Services | `app/services/` | 业务逻辑层（task_service 任务管理、task_control 暂停/取消控制、task_repository 仓储、template_service 模板、health 健康检查、agent_service Agent 执行 + 队列消费） |
+| API | `app/api/` | FastAPI 路由（tasks/agent/stats/tools/templates/traces + health 探针）+ 认证 + 全局异常处理 + CORS |
 | Prompts | `app/prompts/` | Prompt 模板集中管理（含多 Agent Supervisor/SubAgent/Reviewer 模板） |
 | Tracing | `app/tracing/` | 执行追踪（任务 / 节点 span / 工具调用事件 / Agent 步骤事件，进程内环形缓存 + 结构化日志） |
 | Config | `app/config/` | 配置管理、数据库连接、日志 |
-| Frontend | `frontend/` | React + Vite + TS SPA（Apple 设计语言五大界面） |
+| Frontend | `frontend/` | React + Vite + TS SPA（Apple 设计语言四大界面） |
 
 ### LangGraph 状态机流程
 
@@ -127,7 +130,7 @@ START --> [Supervisor] --multi_agent--> [SubAgents] --> [Reviewer] --> END
   - 还有未完成任务 --> Executor (继续)
   - 全部完成 --> END
 
-### Memory / RAG 数据流
+### Memory 数据流
 
 ```
 [Memory]
@@ -139,20 +142,17 @@ START --> [Supervisor] --multi_agent--> [SubAgents] --> [Reviewer] --> END
               用户 A 的记忆不会被用户 B 召回（默认作用域 anonymous/default）
             AgentService 任务开始时 recall（限定调用者作用域）注入 context，
             完成后 remember 写回（由 ENABLE_LONG_TERM_MEMORY 开关控制）
-
-[RAG]
-  ingest: 文件 --> DocumentLoader(PDF/DOCX/TXT/MD) --> TextSplitter(分块)
-          --> 智谱 embedding-3 --> 向量库(collection=rag_documents)
-  search: query --> embed --> 向量召回(cosine, RETRIEVAL_TOP_K)
-          --(ENABLE_RERANK=true)--> 智谱 Rerank 精排(阈值过滤) --> Top-K 相关片段
-          --(关闭或 rerank 失败回退)--> 向量序 Top-K 相关片段
-          RAGRetrievalTool / POST /knowledge/search 均复用此链路
+            向量库后端可插拔：Chroma（默认，进程内持久化）/ pgvector（生产多实例）
 
 [持久化]
   任务: TaskService --> 仓库层（memory | sqlite | PostgreSQL+SQLAlchemy Async，
         TASK_STORAGE_BACKEND=auto 时 PostgreSQL 优先、失败降级内存）
+        （ENVIRONMENT=production 下禁用内存后端与 auto 降级，PostgreSQL 不可用即抛错）
   执行检查点: LangGraph checkpointer（thread_id=task_id）--> PostgresSaver |
         MemorySaver（CHECKPOINT_BACKEND=auto 时 PostgreSQL 优先、失败降级内存）
+        （production 下禁用 MemorySaver，不可用即抛错）
+  表结构演进: Alembic（alembic.ini + migrations/），ORM 为单一来源，
+        生产部署执行 alembic upgrade head；双路径一致性由测试保证
 ```
 
 ### 内置工具
@@ -200,12 +200,12 @@ API 层集成了 `ErrorHandlerMiddleware` 全局异常处理中间件：
 - Python 3.11+
 - PostgreSQL（可选）：任务持久化（TASK_STORAGE_BACKEND=auto/postgres）、
   LangGraph Checkpoint（CHECKPOINT_BACKEND=auto/postgres）、pgvector 向量库后端均可用；
-  未配置时任务/检查点自动降级为进程内存，适合开发。
-- Redis（可选，连接失败时短期记忆自动降级为进程内存）
+  未配置时任务/检查点自动降级为进程内存，适合开发（生产模式下禁止降级，须配置）。
+- Redis（可选，连接失败时任务队列与短期记忆自动降级为进程内存；生产模式必须可用）
 - Chroma（进程内持久化，无需外部服务；生产多实例部署建议切换 pgvector）
 - Tavily API Key（可选，启用 Web 搜索工具时需要）
 
-> 依赖说明：`chromadb`、`tavily-python`、`pypdf`、`python-docx` 为 Memory/RAG/工具新增依赖，
+> 依赖说明：`chromadb`、`tavily-python`、`pypdf`、`python-docx`、`alembic` 为记忆/工具/迁移依赖，
 > 已列入 `requirements.txt`。`chromadb` 体积较大，首次安装耗时较长。向量库数据目录（`data/chroma`）、
 > 任务 sqlite 库（`data/tasks.db`）与 SQL 沙箱库（`data/sandbox.db`）均已加入 `.gitignore`。
 
@@ -213,15 +213,19 @@ API 层集成了 `ErrorHandlerMiddleware` 全局异常处理中间件：
 
 | 能力 | 开发/单机默认 | 生产推荐 | 配置 |
 |------|--------------|----------|------|
-| 任务存储 | 内存（重启丢失） | PostgreSQL（SQLAlchemy Async） | `TASK_STORAGE_BACKEND=auto` 或 `postgres` |
-| 执行状态检查点 | MemorySaver（重启丢失） | PostgreSQL（PostgresSaver） | `CHECKPOINT_BACKEND=auto` 或 `postgres`（`ENABLE_CHECKPOINTING=true`） |
+| 运行环境 | `ENVIRONMENT=development`（允许降级） | `ENVIRONMENT=production`（禁降级 + fail-fast + 任务门禁） | `ENVIRONMENT` |
+| 任务存储 | 内存（重启丢失） | PostgreSQL（SQLAlchemy Async） | `TASK_STORAGE_BACKEND=postgres` |
+| 执行状态检查点 | MemorySaver（重启丢失） | PostgreSQL（PostgresSaver） | `CHECKPOINT_BACKEND=postgres`（`ENABLE_CHECKPOINTING=true`） |
+| 任务队列 | 进程内内存队列 | Redis 可靠队列 | `TASK_QUEUE_BACKEND=redis` |
 | 向量库 | Chroma 单机目录（多 Pod 数据竞争） | pgvector（Milvus/Qdrant 同理扩展） | `VECTOR_STORE_BACKEND=pgvector` + `EMBEDDING_DIM` |
 | 长期记忆隔离 | 按 user_id + tenant_id 强过滤 | 同左（metadata 过滤 + 复合 ID） | 内置，无需配置 |
+| 表结构 | create_all 引导 | `alembic upgrade head`（存量库 `alembic stamp head`） | alembic.ini |
 
 - 多租户隔离内置：任务按 `tenant_id` 隔离，长期记忆写入 `user_id`/`tenant_id` 元数据
   且查询强制过滤，用户 A 的记忆不会被用户 B 召回。
 - 任务崩溃恢复：`thread_id=task_id` 的检查点 + 同线程重放，服务重启后重新提交执行
   即从断点继续，不重复执行已完成节点。
+- 探针接入：Kubernetes livenessProbe → `/health/live`，readinessProbe → `/health/ready`。
 
 ### 安装与启动
 
@@ -241,8 +245,12 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env 文件，填入智谱 API Key 等配置
 
-# 5. 启动服务
+# 5. 启动服务（开发模式）
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# 6. 生产部署（表结构迁移 + 生产模式启动）
+alembic upgrade head
+ENVIRONMENT=production uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ### 访问
@@ -278,14 +286,13 @@ npm run test   # vitest run
 > 需先启动后端（`uvicorn main:app`）再启动前端，任务执行链路方可联调。
 > 真实 Agent 执行依赖有效的智谱 API Key；无 Key 时前端会优雅展示 `failed`/空 plan 状态。
 
-**五大界面：**
+**四大界面：**
 
 | 界面 | 路由 | 说明 |
 |------|------|------|
-| 系统概览仪表盘 | `/` | 消费 `GET /stats` + `/tools`：任务状态分布（10 态）、审批待办角标与列表、工具能力、知识库规模、健康/版本 |
+| 系统概览仪表盘 | `/` | 消费 `GET /stats` + `/tools`：任务状态分布（10 态）、审批待办角标与列表、工具能力、健康/版本 |
 | 任务控制台 | `/tasks`、`/tasks/:id` | 任务列表（待审批行高亮）、创建即执行表单、详情页：进度轮询/计划/子任务/反思/结果 + 暂停/恢复/取消/重试控制 + 待审批卡片（可改参批准）+ 多 Agent 结果 |
 | 任务模板 | `/templates` | 内置 Agent Skill 与自定义模板卡片、`{var}` 变量输入一键创建任务（可立即执行）、模板 CRUD |
-| 知识库管理 | `/knowledge` | 路径入库、文件上传、检索验证、已索引文档列表与删除 |
 | Agent 执行监控 | `/monitoring`、`/monitoring/:id` | Planner→Executor→Reflection→Replanner 阶段时间线、迭代/版本、每子任务所用工具 |
 
 ---
@@ -428,21 +435,33 @@ curl -X POST http://localhost:8000/api/v1/templates/ \
 ### 健康检查
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8000/health         # 基础信息（向后兼容）
+curl http://localhost:8000/health/live    # 存活探针（进程存活即 200）
+curl http://localhost:8000/health/ready   # 就绪探针（核心组件不可用返回 503）
 ```
 
-**响应：**
+`/health/ready` **响应（就绪）：**
 
 ```json
 {
-  "status": "ok",
-  "version": "0.1.0"
+  "ready": true,
+  "environment": "development",
+  "components": {
+    "database": {"status": "up", "core": true},
+    "queue": {"status": "up", "core": true},
+    "vector_db": {"status": "up", "core": false},
+    "llm": {"status": "up", "core": true}
+  }
 }
 ```
 
+> 生产模式（`ENVIRONMENT=production`）下：启动即执行基础设施健康检查，核心依赖
+> 不可用直接终止启动（fail-fast）；任务接收端点（创建/执行/恢复/重试/模板运行/审批决策）
+> 在未就绪时返回 503 拒绝。开发模式行为完全不变。
+
 ### 系统概览统计
 
-供仪表盘一次性获取任务分布、工具数与知识库规模：
+供仪表盘一次性获取任务分布与工具数：
 
 ```bash
 curl http://localhost:8000/api/v1/stats
@@ -455,9 +474,7 @@ curl http://localhost:8000/api/v1/stats
   "version": "0.1.0",
   "task_total": 3,
   "tasks_by_status": {"completed": 2, "executing": 1},
-  "tool_count": 5,
-  "knowledge_document_count": 2,
-  "knowledge_chunk_count": 24
+  "tool_count": 5
 }
 ```
 
@@ -480,61 +497,16 @@ curl http://localhost:8000/api/v1/tools
 }
 ```
 
-### 知识库入库（RAG）
+### 执行追踪查询
 
-将本地文件解析、分块、向量化并索引到 Chroma：
-
-```bash
-curl -X POST http://localhost:8000/api/v1/knowledge/documents \
-  -H "Content-Type: application/json" \
-  -d '{"file_path": "docs/handbook.md"}'
-```
-
-**响应：**
-
-```json
-{
-  "source": "docs/handbook.md",
-  "chunks_indexed": 12
-}
-```
-
-### 知识库检索（RAG）
+查询执行追踪事件（任务 Run / 节点 span / 工具调用 / Agent 步骤）：
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/knowledge/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "如何配置向量库", "top_k": 3}'
-```
+# 全部追踪事件（进程内环形缓存）
+curl http://localhost:8000/api/v1/traces
 
-**响应：**
-
-```json
-{
-  "query": "如何配置向量库",
-  "results": [
-    {"content": "...", "metadata": {"source": "docs/handbook.md"}, "score": 0.82}
-  ]
-}
-```
-
-### 知识库文件上传
-
-浏览器无法提供服务端路径，改用 multipart 上传（后端写临时文件后复用入库链路）：
-
-```bash
-curl -X POST http://localhost:8000/api/v1/knowledge/upload \
-  -F "file=@docs/handbook.md"
-```
-
-### 已索引文档列表 / 删除
-
-```bash
-# 列出（按来源聚合，含分块数）
-curl http://localhost:8000/api/v1/knowledge/documents
-
-# 删除（source 作为查询参数，避免路径斜杠与路由冲突）
-curl -X DELETE "http://localhost:8000/api/v1/knowledge/documents?source=docs/handbook.md"
+# 指定任务的追踪
+curl http://localhost:8000/api/v1/traces/{task_id}
 ```
 
 ---
@@ -582,18 +554,29 @@ curl -X DELETE "http://localhost:8000/api/v1/knowledge/documents?source=docs/han
 - **缓存与强时效绕过**：普通知识结果进程内缓存可配置（`WEB_SEARCH_CACHE_TTL`），
   强时效问题（今天/刚刚/当前）使用更短 TTL 并绕过缓存（`WEB_SEARCH_TIME_SENSITIVE_CACHE_TTL`）
 
-### 检索增强（Hybrid + 动态分块）
+### 生产安全模式（P0-1）
 
-- **混合检索（Hybrid Search）**：`ENABLE_HYBRID_SEARCH=true` 时，BM25 关键词召回与向量语义召回
-  经 Reciprocal Rank Fusion 融合（`HYBRID_RRF_K`），提升专有名词/编号/型号命中；
-  `rank_bm25` 缺失时自动降级为纯向量检索（不影响导入链）
-- **动态分块（Dynamic Chunking）**：`RAG_DYNAMIC_CHUNKING=true` 时按文档类型选择分块参数
-  （代码类大块、法律类小块），其余走 `RAG_CHUNK_SIZE` / `RAG_CHUNK_OVERLAP` 默认值
+- **环境分区**：`ENVIRONMENT=development|production`。生产模式禁止一切静默降级
+  （内存任务存储 / MemorySaver / 内存队列 / 内存短期记忆 / Mock 工具 email.send），
+  开发模式行为完全不变（保留降级）
+- **启动 fail-fast**：生产模式 lifespan 启动即执行 `verify_production_readiness`，
+  核心依赖（PostgreSQL / Redis / 向量库 / LLM）不可用直接终止启动
+- **健康探针**：`GET /health/live`（存活）与 `GET /health/ready`（就绪，未就绪 503 + 组件明细），
+  供 Kubernetes / 编排系统使用；`GET /health` 保持兼容
+- **任务接收门禁**：生产模式下任务接收端点在未就绪时返回 503 拒绝（`require_ready`）
+
+### 数据库迁移（Alembic）
+
+- `migrations/versions/20260819_0001_baseline_tasks.py` 为 `tasks` 表基线，与 ORM 逐列对齐
+  （`tests/test_migrations.py` 保证 create_all 与 alembic 双路径结构不漂移）
+- 开发环境可 `create_all` 引导；生产部署执行 `alembic upgrade head`；
+  存量库首次接入执行 `alembic stamp head` 标记基线
+- `alembic.ini` 必须保持 ASCII（zh-CN Windows 上 alembic CLI 以 GBK 读 ini）
 
 ### 容错与恢复
 
 - **工具调用重试**：对网络超时、连接错误等瞬时失败自动重试最多 2 次（指数退避 1s → 2s），非瞬时错误直接抛出
-- **LangGraph 检查点持久化**：`workflow.build(checkpointer=...)` 支持传入 checkpointer 实例（如 `MemorySaver`、`SqliteSaver`），实现长时间任务的断点恢复
+- **LangGraph 检查点持久化**：`workflow.build(checkpointer=...)` 支持传入 checkpointer 实例（如 `MemorySaver`、`PostgresSaver`），实现长时间任务的断点恢复
 
 ### 安全
 
@@ -606,12 +589,9 @@ curl -X DELETE "http://localhost:8000/api/v1/knowledge/documents?source=docs/han
 - **Executor 子任务延迟指标**：每个 task_result 自动记录 `latency_ms`，便于分析执行瓶颈
 - **全链路执行追踪**：Trace 系统（`app/tracing/`）记录任务级 Run、节点 span（含 LLM 用量归因）、
   工具调用事件与 Agent 步骤事件（输入、上下文快照、提取参数、审批结果、耗时、错误），
-  进程内环形缓存 + 结构化日志，可定位"每一步 context 是什么"，便于调试与审计
+  进程内环形缓存 + 结构化日志，可定位"每一步 context 是什么"，便于调试与审计；
+  `GET /api/v1/traces` 与 `GET /api/v1/traces/{task_id}` 提供查询
 - **CI 安全扫描**：GitHub Actions 新增 `pip-audit` job 检测依赖漏洞，带 `--ignore-vuln PYSEC-2026-311` 豁免项（chromadb 相关漏洞：本项目未使用 trust_remote_code、内嵌使用未暴露服务端点、官方暂无修复版本，理由见 `.github/workflows/ci.yml` 注释）
-
-### 可选依赖
-
-- `sqlparse`（可选，未列入 `requirements.txt`；安装后增强 SQL 语句类型检测，未安装时自动回退纯正则校验）
 
 ---
 
@@ -629,7 +609,6 @@ pytest tests/test_llm.py -v
 pytest tests/test_agent.py -v
 pytest tests/test_tools.py -v
 pytest tests/test_memory.py -v
-pytest tests/test_rag.py -v
 pytest tests/test_integration.py -v
 pytest tests/test_new_endpoints.py -v
 pytest tests/test_multi_agent.py -v
@@ -638,6 +617,14 @@ pytest tests/test_task_control.py -v
 pytest tests/test_templates.py -v
 pytest tests/test_checkpoint.py -v
 pytest tests/test_agent_capabilities.py -v
+pytest tests/test_budget.py -v
+pytest tests/test_search_timeliness.py -v
+pytest tests/test_tool_runtime.py -v
+pytest tests/test_trace.py -v
+pytest tests/test_queue.py -v
+pytest tests/test_task_storage.py -v
+pytest tests/test_migrations.py -v
+pytest tests/test_production_mode.py -v
 ```
 
 > 测试全部离线可跑：智谱 embedding 用 mock provider，Chroma 用临时目录，Redis/Tavily 无需真实服务。
@@ -687,11 +674,12 @@ pytest tests/test_agent_capabilities.py -v
 | `test_agent_capabilities.py` | `TestCase6~10` | 多 Agent 上下文透传（Supervisor/SubAgent/Reviewer 拿到完整 Query 与已提取参数）、必填参数缺失阻断工具调用、web_search 默认不触发 HITL（风险分级可配置）、工具失败重试/回退、Reviewer 聚合上下文 |
 | `test_budget.py` | `TestBudget` | 单任务 LLM 预算（次数/token/金额）超限终止 |
 | `test_search_timeliness.py` | `TestSearchTimeliness` | 搜索意图分类、结果时效性评分、缓存绕过、来源质量排序 |
-| `test_rag_hybrid.py` | `TestRagHybrid` | 混合检索（向量 + BM25 RRF 融合）与 BM25 缺失降级 |
 | `test_tool_runtime.py` | `TestToolRuntime` | 统一 Tool Runtime（Schema/注册表/执行器/权限/错误处理） |
 | `test_trace.py` | `TestTrace` | 执行追踪（Run/节点 span/工具调用事件） |
 | `test_queue.py` | `TestQueue` | 任务队列抽象与异步 Worker |
 | `test_task_storage.py` | `TestTaskStorage` | 任务存储后端（memory/sqlite） |
+| `test_migrations.py` | `TestMigrations` | Alembic 基线迁移与 ORM/create_all 双路径结构一致性 |
+| `test_production_mode.py` | `TestProductionMode` | 生产模式守卫（禁内存存储/内存队列/MemorySaver/Mock 工具、健康检查、任务门禁） |
 | `test_extract_text.py` | `TestExtractText` | LLM 响应 content 归一化（含 Anthropic block 列表） |
 
 ### 后端一键检查
@@ -734,22 +722,25 @@ ai-agent-task-assistant/
 │   │   ├── v1/
 │   │   │   ├── tasks.py    # 任务创建/列表(状态过滤)/状态查询 + 暂停/恢复/取消/重试 + 审批 API
 │   │   │   ├── agent.py    # 任务执行 API（POST /tasks/{id}/execute）
-│   │   │   ├── knowledge.py# 知识库入库/上传/检索/列表/删除 API
 │   │   │   ├── stats.py    # 系统概览统计 API
 │   │   │   ├── templates.py# 任务模板 CRUD + 模板创建任务 API
+│   │   │   ├── traces.py   # 执行追踪查询 API（GET /traces、/traces/{task_id}）
 │   │   │   └── tools.py    # 工具清单 API
-│   │   ├── health.py       # 健康检查端点（/health，根路径）
+│   │   ├── auth.py         # API Key 认证（AUTH_ENABLED 开启时校验 /api/v1）
+│   │   ├── health.py       # 健康检查端点（/health、/health/live、/health/ready）
 │   │   ├── router.py       # 路由汇总（前缀 /api/v1）
-│   │   ├── deps.py         # 依赖注入
-│   │   └── errors.py       # 全局异常处理（AppException + 中间件）
+│   │   ├── deps.py         # 依赖注入（含 require_ready 生产就绪门禁）
+│   │   └── errors.py       # 全局异常处理（AppException + 中间件 + 503）
 │   ├── config/             # 配置管理
-│   │   ├── settings.py     # Pydantic Settings（.env / 环境变量覆盖）
-│   │   ├── database.py     # 数据库连接（PostgreSQL 预留）
+│   │   ├── settings.py     # Pydantic Settings（.env / 环境变量覆盖，含环境分区）
+│   │   ├── database.py     # 数据库连接（PostgreSQL Async Engine/Session）
+│   │   ├── eventloop.py    # 事件循环内探测辅助（队列工厂线程探测）
 │   │   └── logging.py      # structlog 日志配置
 │   ├── llm/                # LLM Provider
 │   │   ├── base.py         # 抽象基类
 │   │   ├── zhipu_provider.py # 智谱实现（Anthropic 兼容端点）
 │   │   ├── embeddings.py   # Embedding 抽象层 + 智谱 embedding-3
+│   │   ├── budget.py       # 单任务 LLM 预算（次数/token/金额超限终止）
 │   │   └── factory.py      # 工厂模式（LLM + Embedding）
 │   ├── models/             # 数据模型
 │   │   ├── task.py         # 任务模型（Task / SubTask / TaskStatus / ApprovalRequest）
@@ -766,8 +757,8 @@ ai-agent-task-assistant/
 │   ├── queue/              # 任务队列（异步化架构）
 │   │   ├── base.py         # TaskQueue 抽象 + TaskMessage
 │   │   ├── memory_queue.py # 进程内内存队列
-│   │   ├── redis_queue.py  # Redis 可靠队列（不可达自动降级）
-│   │   └── factory.py      # 队列工厂（auto/redis/memory）
+│   │   ├── redis_queue.py  # Redis 可靠队列（不可达自动降级；生产禁内存）
+│   │   └── factory.py      # 队列工厂（auto/redis/memory，线程内探测）
 │   ├── worker.py           # 内置 Worker 入口（python -m app.worker）
 │   ├── tools/              # 工具框架
 │   │   ├── base.py         # 工具抽象基类（BaseTool / ToolInput / ToolOutput / required_params）
@@ -779,11 +770,11 @@ ai-agent-task-assistant/
 │   │   ├── permissions.py  # 权限字符串匹配
 │   │   ├── errors.py       # 工具错误体系与归一化
 │   │   ├── context.py      # 工具执行上下文（ToolContext / ToolExecutionContext）
-│   │   ├── builtins.py     # 内置核心工具（datetime/calculator/web_search/sql/file/rag）+ 注册入口
+│   │   ├── builtins.py     # 内置核心工具（datetime/calculator/web_search/sql/file）+ 注册入口
 │   │   ├── web_search.py   # Tavily Web 搜索（含意图分类/时效性/缓存）
 │   │   ├── sql_query.py    # SQLite 沙箱只读查询
-│   │   ├── file_processing.py # 本地文件解析
-│   │   ├── rag_tool.py     # RAG 知识库检索
+│   │   ├── file_loader.py  # 文档加载器（PDF/DOCX/TXT/MD，自包含）
+│   │   ├── file_processing.py # 本地文件解析（基于 file_loader）
 │   │   ├── search_intent.py / search_freshness.py / search_cache.py # 搜索意图/时效性/缓存
 │   │   ├── http_read.py / http_action.py # HTTP 只读/行动工具
 │   │   ├── code_execution.py / data_transform.py # Reason 类工具
@@ -792,34 +783,27 @@ ai-agent-task-assistant/
 │   │   └── interact_tools.py # Interact 类工具（message/ask/approval）
 │   ├── memory/             # 记忆系统
 │   │   ├── base.py         # 抽象基类
-│   │   ├── short_term.py   # Redis 短期记忆（内存降级）
-│   │   ├── long_term.py    # Chroma 长期记忆
+│   │   ├── short_term.py   # Redis 短期记忆（内存降级；生产 strict 模式）
+│   │   ├── long_term.py    # 长期记忆（可插拔向量库后端）
+│   │   ├── vector_store.py # 向量存储抽象 + Chroma 实现
+│   │   ├── vector_store_pg.py # pgvector 向量库后端（生产多实例）
 │   │   └── factory.py      # 记忆工厂
-│   ├── rag/                # RAG 系统
-│   │   ├── base.py         # 抽象基类 + Document
-│   │   ├── loader.py       # 文档加载（PDF/DOCX/TXT/MD）
-│   │   ├── splitter.py     # 文本分块
-│   │   ├── vector_store.py # Chroma 封装
-│   │   ├── hybrid_retriever.py # 混合检索（向量 + 关键词 BM25）
-│   │   ├── indexer.py      # 索引器
-│   │   ├── retriever.py    # 检索器
-│   │   ├── reranker.py     # 智谱 Rerank 精排（ENABLE_RERANK 开启时生效）
-│   │   └── service.py      # RAG 服务门面
 │   ├── tracing/            # 执行追踪（recorder.py：Run/NodeSpan/ToolCallEvent/AgentStepEvent + 环形缓存）
 │   └── services/           # 业务服务层
 │       ├── task_service.py # 任务管理（内存/SQLite/PostgreSQL 可插拔仓库）
 │       ├── task_repository.py # 任务仓库层
 │       ├── task_control.py # 暂停/取消控制注册表
 │       ├── template_service.py # 任务模板服务（内置种子 + CRUD + 渲染建任务）
+│       ├── health.py       # 基础设施健康检查 + 就绪门禁（7 类组件并行探测）
 │       └── agent_service.py# Agent 执行（队列消费 + Checkpoint + 长期记忆）
 ├── frontend/               # React + Vite + TS 前端 SPA
 │   ├── src/
 │   │   ├── main.tsx        # 入口（Provider 链：Query/Toast/Router/ErrorBoundary）
-│   │   ├── App.tsx         # 路由配置（React.lazy 分包五大界面）
+│   │   ├── App.tsx         # 路由配置（React.lazy 分包四大界面）
 │   │   ├── lib/            # types / apiClient / queryClient / cx
 │   │   ├── styles/         # tokens.css（Apple 设计令牌）+ globals.css
 │   │   ├── components/     # 原语组件库（Button/StatusPill/Table/...）
-│   │   └── features/       # dashboard / tasks / templates / knowledge / monitoring
+│   │   └── features/       # dashboard / tasks / templates / monitoring
 │   ├── index.html
 │   ├── vite.config.ts      # /api 代理 + manualChunks 分包
 │   ├── vitest.setup.ts     # 前端测试环境初始化
@@ -832,7 +816,6 @@ ai-agent-task-assistant/
 │   ├── test_api.py         # API 测试
 │   ├── test_tools.py       # 工具测试
 │   ├── test_memory.py      # 记忆系统测试
-│   ├── test_rag.py         # RAG 测试
 │   ├── test_integration.py # Agent 端到端集成测试（FakeChatModel + 真实工具链）
 │   ├── test_new_endpoints.py # stats/tools 接口 + 任务状态回写测试
 │   ├── test_multi_agent.py # 多 Agent 协作测试
@@ -843,23 +826,30 @@ ai-agent-task-assistant/
 │   ├── test_agent_capabilities.py # Agent 能力回归测试（Multi-Agent Context / 参数检查 / 风险分级 / 失败回退 / Reviewer 上下文）
 │   ├── test_budget.py      # LLM 预算测试
 │   ├── test_search_timeliness.py # 搜索时效性测试
-│   ├── test_rag_hybrid.py  # 混合检索测试
 │   ├── test_tool_runtime.py # 统一 Tool Runtime 测试
 │   ├── test_trace.py       # 执行追踪测试
 │   ├── test_queue.py       # 任务队列测试
 │   ├── test_task_storage.py # 任务存储后端测试
+│   ├── test_migrations.py  # Alembic 迁移与 ORM 一致性测试
+│   ├── test_production_mode.py # 生产模式守卫测试
 │   └── test_extract_text.py # LLM 响应归一化测试
+├── migrations/             # Alembic 迁移（versions/ 内含 tasks 基线）
 ├── scripts/                # 辅助脚本
 │   ├── check.py            # 一键质量门禁（ruff + pytest，CI 同款）
-│   └── zhipu_selftest.py   # 智谱 API 联调自测（Chat/Embedding/Rerank/工具）
+│   ├── zhipu_selftest.py   # 智谱 API 联调自测（Chat/Embedding/工具）
+│   ├── clear_tasks.py      # 清空数据库中的全部任务记录
+│   ├── list_tasks.py       # 列出后端中的所有任务
+│   ├── run_cases.py        # 4 用例集成测试驱动（生成 test_report.json）
+│   └── run_light_cases.py  # 5 用例轻量 Agent 测试驱动
 ├── .github/workflows/
 │   └── ci.yml              # CI：quality-gate（ruff+pytest）+ security（pip-audit）
 ├── data/                   # 运行期产物（Chroma 向量库 / SQL 沙箱，不提交）
-├── docs/                   # 技术文档（docx）
+├── docs/                   # 技术文档（architecture_review.md）
 ├── main.py                 # 薄入口 shim（透传 app.main.app，兼容 uvicorn main:app）
+├── alembic.ini             # Alembic 配置（ASCII-only）
 ├── pyproject.toml          # 项目配置 + ruff/pytest 配置（exclude frontend）
 ├── requirements.txt        # Python 依赖
-├── test.http               # 接口调试请求集（IDE HTTP Client）
+├── CHANGELOG.md            # 阶段变更记录
 ├── AGENTS.md               # Coding Agent 任务入口说明
 ├── .env.example            # 环境变量模板（.env 不入库）
 └── README.md               # 项目文档
@@ -875,6 +865,9 @@ ai-agent-task-assistant/
 |--------|--------|------|
 | `APP_NAME` | `AI Agent Task Assistant` | 应用名称 |
 | `DEBUG` | `false` | 调试模式 |
+| `ENVIRONMENT` | `development` | 运行环境：development / production。production 下禁止一切静默降级，启动即执行基础设施健康检查（fail-fast），任务接收端点未就绪时 503 拒绝 |
+| `HEALTH_CHECK_TIMEOUT` | `2.0` | 基础设施健康检查单组件探测超时（秒） |
+| `HEALTH_CACHE_TTL` | `5.0` | 就绪状态缓存 TTL（秒，0=实时探测） |
 | `AUTH_ENABLED` | `false` | 是否启用 API 认证（生产建议开启，开启后 /api/v1 需携带 API Key） |
 | `API_KEYS` | `""` | 逗号分隔的合法 API Key 列表（`Authorization: Bearer` / `X-API-Key`） |
 | `CORS_ORIGINS` | `["http://localhost:5173", "http://127.0.0.1:5173"]` | 允许跨域的前端来源白名单（配合 allow_credentials） |
@@ -902,26 +895,13 @@ ai-agent-task-assistant/
 | `WEB_SEARCH_ENABLE_LLM_INTENT` | `false` | 是否叠加 LLM 做搜索意图分类（默认用确定性规则） |
 | `WEB_SEARCH_OFFICIAL_DOMAINS` / `WEB_SEARCH_TRUSTED_DOMAINS` / `WEB_SEARCH_LOW_QUALITY_DOMAINS` | `[]` | 来源质量分域：官方一手 / 可信 / 低质域名（支持子域匹配） |
 
-### 向量库与 RAG
+### 向量库与记忆
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `CHROMA_PERSIST_DIR` | `""` | Chroma 持久化目录（留空则用 data/chroma） |
+| `CHROMA_PERSIST_DIR` | `""` | Chroma 持久化目录（留空则用 data/chroma，长期记忆使用） |
 | `VECTOR_STORE_BACKEND` | `chroma` | 向量库后端：chroma / pgvector |
 | `EMBEDDING_DIM` | `2048` | pgvector 建表向量维度（须与 embedding 模型输出一致） |
-| `RAG_CHUNK_SIZE` | `800` | RAG 分块大小 |
-| `RAG_CHUNK_OVERLAP` | `100` | RAG 分块重叠 |
-| `RAG_TOP_K` | `5` | RAG 检索默认返回数 |
-| `RAG_DYNAMIC_CHUNKING` | `true` | 是否按文档类型动态选择分块参数（代码类大块/法律类小块） |
-| `ENABLE_HYBRID_SEARCH` | `false` | 是否启用混合检索（BM25 关键词 + 向量语义，RRF 融合） |
-| `HYBRID_VECTOR_RECALL_K` | `20` | 混合检索向量召回候选数 |
-| `HYBRID_BM25_RECALL_K` | `20` | 混合检索 BM25 关键词召回候选数 |
-| `HYBRID_RRF_K` | `60` | RRF 融合常数（越大越平滑） |
-| `ENABLE_RERANK` | `false` | 是否启用召回后 Rerank 精排（.env 示例默认开启） |
-| `ZHIPU_RERANK_MODEL` | `rerank` | 智谱 Rerank 模型编码 |
-| `RETRIEVAL_TOP_K` | `20` | 向量召回候选数（rerank 前，上限 128） |
-| `RERANK_TOP_K` | `5` | Rerank 精排后保留的结果数 |
-| `RERANK_SCORE_THRESHOLD` | `0.0` | Rerank 相关性分数阈值，低于阈值的片段被过滤 |
 | `SQLITE_SANDBOX_PATH` | `""` | SQL 工具沙箱库路径（留空则用 data/sandbox.db） |
 | `ENABLE_LONG_TERM_MEMORY` | `false` | 是否在任务中启用长期记忆召回/写入 |
 
@@ -940,6 +920,9 @@ ai-agent-task-assistant/
 | `REDIS_QUEUE_KEY` | `agent:tasks:queue` | Redis 任务队列键名 |
 | `QUEUE_DEQUEUE_TIMEOUT` | `1.0` | Worker 拉取任务超时（秒） |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` | `localhost` / `6379` / `0` | Redis 连接（失败自动降级内存） |
+
+> 上表中 auto 后端的「失败降级」仅在 `ENVIRONMENT=development` 生效；
+> production 下 memory 后端被拒绝、auto 探测失败直接抛错（fail-fast）。
 
 ### Agent 执行与工具审批
 

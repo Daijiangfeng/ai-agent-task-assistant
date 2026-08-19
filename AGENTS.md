@@ -21,8 +21,8 @@
 | Tools | `app/tools/` | 工具框架（BaseTool + ToolRegistry + 内置工具）、统一执行管线（executor.py）、工具风险分级（risk.py）、搜索时效性（意图/新鲜度/缓存：search_intent.py / search_freshness.py / search_cache.py）、文件加载器（file_loader.py，供 file_processing 解析 PDF/DOCX/TXT/MD）、执行边界/审批钩子 |
 | Memory | `app/memory/` | Redis 短期记忆（内存降级）+ 长期记忆（Chroma/pgvector 向量库，vector_store.py 可插拔后端） |
 | Models | `app/models/` | Pydantic 数据模型（含任务模板）与 API Schema、SQLAlchemy ORM |
-| Services | `app/services/` | 业务逻辑层（task_service 任务管理、task_control 暂停/取消、template_service 模板、agent_service Agent 执行、health 健康检查） |
-| API | `app/api/` | FastAPI 路由（tasks/agent/stats/tools/templates + health 探针）+ 全局异常处理 |
+| Services | `app/services/` | 业务逻辑层（task_service 任务管理、task_repository 仓储、task_control 暂停/取消、template_service 模板、agent_service Agent 执行、health 健康检查） |
+| API | `app/api/` | FastAPI 路由（tasks/agent/stats/tools/templates/traces + health 探针）+ 认证 + 全局异常处理 |
 | Prompts | `app/prompts/` | Prompt 模板集中管理（含多 Agent Supervisor/SubAgent/Reviewer） |
 | Tracing | `app/tracing/` | 执行追踪（recorder.py：任务/节点 span/工具调用/Agent 步骤事件 + 环形缓存） |
 | Config | `app/config/` | Settings（含 HITL 分级、Agent 上限、工具审批策略）、数据库连接、structlog 日志配置 |
@@ -66,6 +66,10 @@ pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000   # 启动服务
 python scripts/check.py                                 # 统一门禁：ruff + pytest（CI quality-gate 同款）
 alembic upgrade head                                    # 应用数据库迁移（生产部署步骤；存量库首次接入用 alembic stamp head）
+python scripts/list_tasks.py                            # 运维：列出后端中的所有任务
+python scripts/clear_tasks.py                           # 运维：清空数据库中的全部任务记录（慎用）
+python scripts/run_cases.py                             # 4 用例集成测试驱动（生成 test_report.json，需后端运行中）
+python scripts/run_light_cases.py                       # 5 用例轻量 Agent 测试驱动（需后端运行中）
 ```
 
 前端（`frontend/` 目录执行）：
