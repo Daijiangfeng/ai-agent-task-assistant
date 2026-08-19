@@ -67,15 +67,25 @@ class TaskService:
         if self._backend in (POSTGRES_BACKEND, SQLITE_BACKEND):
             self._repo = SQLAlchemyTaskRepository(self._settings, self._backend)
         elif self._backend == MEMORY_BACKEND:
+            if self._settings.is_production:
+                raise RuntimeError(
+                    "生产环境禁止内存任务存储（TASK_STORAGE_BACKEND=memory），"
+                    "请配置 PostgreSQL（TASK_STORAGE_BACKEND=postgres）"
+                )
             self._repo = InMemoryTaskRepository()
         elif self._backend != "auto":
+            if self._settings.is_production:
+                raise RuntimeError(
+                    f"生产环境不支持未知任务存储后端 {self._backend!r}，"
+                    "请配置 TASK_STORAGE_BACKEND=postgres"
+                )
             logger.warning(
                 "未知任务存储后端 %r，降级为内存存储", self._backend
             )
             self._repo = InMemoryTaskRepository()
 
     async def _get_repo(self) -> TaskRepository:
-        """懒加载仓库；auto 模式探测 PostgreSQL，失败降级内存。"""
+        """懒加载仓库；auto 模式探测 PostgreSQL，失败降级内存（生产禁止降级）。"""
         if self._repo is not None:
             return self._repo
         async with self._repo_lock:
@@ -86,6 +96,12 @@ class TaskService:
                 if await candidate.probe():
                     logger.info("TaskService: 使用 PostgreSQL 持久化存储")
                     self._repo = candidate
+                elif self._settings.is_production:
+                    raise RuntimeError(
+                        "生产环境 PostgreSQL 任务存储不可用"
+                        "（TASK_STORAGE_BACKEND=auto 禁止降级内存），"
+                        "请检查 PostgreSQL 连接配置"
+                    )
                 else:
                     logger.warning("TaskService: PostgreSQL 不可用，降级为内存存储")
                     self._repo = InMemoryTaskRepository()
