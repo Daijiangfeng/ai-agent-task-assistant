@@ -2,12 +2,11 @@
 Agent 任务执行流程集成测试。
 
 覆盖完整链路：AgentService.run_task -> LangGraph Workflow(Planner -> Executor -> Reflection)
--> 工具调用（web_search / sql_query / file_processing / rag_retrieval）-> 长期记忆保存与召回。
+-> 工具调用（web_search / sql_query / file_processing）-> 长期记忆保存与召回。
 
 为保证离线可跑且确定性：
 - 用一个实现了 Runnable 接口的 FakeChatModel 替代真实 LLM，
   根据 Prompt 文本区分 Planner / Executor / Reflection 调用，并驱动工具调用链。
-- RAGService 使用真实实现 + mock embedding + 临时 Chroma（真实检索链路）。
 - 长期记忆使用真实 VectorLongTermMemory + mock embedding + 临时 Chroma。
 - Tavily 客户端被替换为假实现，避免真实网络请求。
 """
@@ -22,26 +21,24 @@ from langchain_core.runnables import Runnable
 
 from app.config.settings import BASE_DIR, Settings
 from app.memory.long_term import VectorLongTermMemory
+from app.memory.vector_store import ChromaStore
 from app.prompts.manager import PromptManager
-from app.rag.service import RAGService
-from app.rag.vector_store import ChromaStore
 from app.services import agent_service as agent_service_module
 from app.services.agent_service import AgentService
 from app.services.task_service import TaskService
 from app.tools.base import ToolInput
 from app.tools.file_processing import FileProcessingTool
-from app.tools.rag_tool import RAGRetrievalTool
 from app.tools.registry import ToolRegistry
 from app.tools.sql_query import SQLQueryTool
 from app.tools.web_search import WebSearchTool
 
-GOAL = "调研 Python 异步编程并结合本地知识库与数据给出总结"
+GOAL = "调研 Python 异步编程并结合联网检索、数据查询与本地文件给出总结"
 
-# 计划固定为 4 个子任务，每个子任务描述中明确指向一个工具，
+# 计划固定为 3 个子任务，每个子任务描述中明确指向一个工具，
 # FakeChatModel 会据此在 Executor 阶段发起对应的工具调用。
 PLAN = {
     "goal": GOAL,
-    "reasoning": "拆解为联网检索、数据库查询、本地文件读取与知识库检索四步。",
+    "reasoning": "拆解为联网检索、数据库查询与本地文件读取三步。",
     "subtasks": [
         {
             "id": "task_1",
@@ -61,16 +58,10 @@ PLAN = {
             "dependencies": [],
             "tool": "file_processing",
         },
-        {
-            "id": "task_4",
-            "description": "使用 rag_retrieval 在本地知识库检索异步相关片段",
-            "dependencies": [],
-            "tool": "rag_retrieval",
-        },
     ],
 }
 
-TOOL_NAMES = ("web_search", "sql_query", "file_processing", "rag_retrieval")
+TOOL_NAMES = ("web_search", "sql_query", "file_processing")
 
 REFLECTION_JSON = {
     "is_satisfactory": True,
@@ -195,32 +186,17 @@ def _install_spy(tool):
 @pytest.fixture
 def integration_env(tmp_path, temp_chroma_dir, mock_embedding_provider, monkeypatch):
     """
-    构建完整集成测试环境：真实工具 + 真实 RAGService + 真实长期记忆。
+    构建完整集成测试环境：真实工具 + 真实长期记忆。
 
     返回一个字典，包含 AgentService、TaskService、长期记忆、
     各工具的调用记录列表以及 FakeChatModel 的共享 record。
     """
-    # 共享一个 Chroma 存储（RAG 与长期记忆用不同 collection）
+    # 共享一个 Chroma 存储（长期记忆专用 collection）
     store = ChromaStore(temp_chroma_dir)
-
-    rag_settings = Settings(RAG_CHUNK_SIZE=100, RAG_CHUNK_OVERLAP=10)
-
-    # --- 真实 RAGService：入库一个临时知识文件 ---
-    kb_file = tmp_path / "kb.txt"
-    kb_file.write_text(
-        "Python 异步编程通过 asyncio 事件循环实现并发。"
-        "async/await 是核心语法。",
-        encoding="utf-8",
-    )
-    rag_service = RAGService(
-        settings=rag_settings,
-        embedding_provider=mock_embedding_provider,
-        vector_store=store,
-    )
 
     # --- 真实长期记忆：Chroma + mock embedding ---
     long_term_memory = VectorLongTermMemory(
-        settings=rag_settings,
+        settings=Settings(),
         embedding_provider=mock_embedding_provider,
         vector_store=store,
     )
@@ -232,21 +208,19 @@ def integration_env(tmp_path, temp_chroma_dir, mock_embedding_provider, monkeypa
     local_file = BASE_DIR / "_integration_tmp.txt"
     local_file.write_text("集成测试用本地说明文件。", encoding="utf-8")
 
-    # --- 注册四个真实工具，并为 execute 安装调用记录代理 ---
+    # --- 注册三个真实工具，并为 execute 安装调用记录代理 ---
     ToolRegistry.clear()
     web_tool = WebSearchTool(Settings(TAVILY_API_KEY="dummy", WEB_SEARCH_MAX_RESULTS=3))
     sql_tool = SQLQueryTool(Settings(SQLITE_SANDBOX_PATH=str(tmp_path / "sandbox.db")))
     file_tool = FileProcessingTool()
-    rag_tool = RAGRetrievalTool(rag_service=rag_service)
 
     calls = {
         "web_search": _install_spy(web_tool),
         "sql_query": _install_spy(sql_tool),
         "file_processing": _install_spy(file_tool),
-        "rag_retrieval": _install_spy(rag_tool),
     }
 
-    for t in (web_tool, sql_tool, file_tool, rag_tool):
+    for t in (web_tool, sql_tool, file_tool):
         ToolRegistry.register(t)
 
     # --- 修正 file_processing 子任务描述为真实存在的本地文件路径 ---
@@ -321,12 +295,12 @@ class TestAgentIntegration:
         assert final_result is not None
         assert GOAL in final_result
 
-        # 四个工具都被真实调用过
+        # 三个工具都被真实调用过
         for name in TOOL_NAMES:
             assert len(calls[name]) >= 1, f"工具 {name} 未被调用"
 
         # 每个子任务的工具调用都完成了“工具结果综合回复”这一轮
-        assert integration_env["record"].get("tool_result_rounds", 0) == 4
+        assert integration_env["record"].get("tool_result_rounds", 0) == 3
 
         # 任务状态被更新为完成
         task = await task_service.get_task(task_id)

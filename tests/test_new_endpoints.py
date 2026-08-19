@@ -1,51 +1,31 @@
 """
 新增只读接口（stats / tools）与任务状态回写逻辑测试。
-覆盖 B2（Agent 状态回写）与 B3（stats/tools/knowledge 只读接口）。
+覆盖 B2（Agent 状态回写）与 B3（stats/tools 只读接口）。
 """
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_rag_service
 from app.config.settings import Settings
 from app.services.task_service import TaskService
 from main import app
-
-
-class _StubRAGService:
-    """离线桩 RAG 服务。
-
-    stats 端点仅需 list_documents / count_chunks（只读向量库计数），
-    真实 RAGService 在构造时会急切初始化智谱 Embedding（需 ANTHROPIC_AUTH_TOKEN），
-    在无 .env 的环境（如 CI）会失败。用桩覆盖依赖使该端点测试离线可跑。
-    """
-
-    async def list_documents(self) -> list:
-        return []
-
-    async def count_chunks(self) -> int:
-        return 0
 
 
 @pytest.fixture
 def client():
     """创建测试客户端。
 
-    覆盖 get_rag_service 为离线桩，避免依赖 .env 中的 ANTHROPIC_AUTH_TOKEN，
-    与 AGENTS.md「测试全部离线可跑」保持一致；
     覆盖 get_task_service 为内存后端，避免 auto 模式读写真实 PostgreSQL
     （asyncpg 引擎绑定首个事件循环，跨 TestClient 会触发 loop 冲突）。
     """
     from app.api.deps import get_task_service
     from app.services.task_service import TaskService
 
-    app.dependency_overrides[get_rag_service] = lambda: _StubRAGService()
     memory_service = TaskService(Settings(TASK_STORAGE_BACKEND="memory"))
     app.dependency_overrides[get_task_service] = lambda: memory_service
     try:
         yield TestClient(app)
     finally:
-        app.dependency_overrides.pop(get_rag_service, None)
         app.dependency_overrides.pop(get_task_service, None)
 
 
@@ -53,7 +33,7 @@ class TestStatsAndToolsAPI:
     """B3：系统概览统计与工具清单接口。"""
 
     def test_get_stats(self, client: TestClient):
-        """/stats 返回任务分布、工具数与知识库计数。"""
+        """/stats 返回任务分布与工具数。"""
         response = client.get("/api/v1/stats")
         assert response.status_code == 200
         data = response.json()
@@ -62,8 +42,6 @@ class TestStatsAndToolsAPI:
         assert isinstance(data["tasks_by_status"], dict)
         # 内置工具已在应用启动时注册，工具数应 >= 0（不依赖具体数量）。
         assert data["tool_count"] >= 0
-        assert data["knowledge_document_count"] >= 0
-        assert data["knowledge_chunk_count"] >= 0
 
     def test_list_tools(self, client: TestClient):
         """/tools 返回已注册工具（名称 + 描述）。"""
