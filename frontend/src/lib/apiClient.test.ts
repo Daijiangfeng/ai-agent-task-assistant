@@ -44,17 +44,6 @@ describe("apiClient", () => {
     expect(JSON.parse(init.body)).toEqual({ goal: "目标", context: "上下文" });
   });
 
-  it("删除文档时通过查询参数传 source", async () => {
-    const fetchMock = mockFetch({ ok: true, json: { source: "a.md", chunks_deleted: 3 } });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await api.knowledge.deleteDocument("docs/a b.md");
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/v1/knowledge/documents?source=docs%2Fa%20b.md");
-    expect(init.method).toBe("DELETE");
-  });
-
   it("非 2xx 响应抛出 ApiError 并携带 detail", async () => {
     const fetchMock = mockFetch({ ok: false, status: 404, json: { detail: "任务不存在" } });
     vi.stubGlobal("fetch", fetchMock);

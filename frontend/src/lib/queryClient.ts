@@ -26,7 +26,6 @@ export const queryKeys = {
   task: (id: string) => ["tasks", "detail", id] as const,
   templates: ["templates"] as const,
   template: (id: string) => ["templates", "detail", id] as const,
-  documents: ["knowledge", "documents"] as const,
 };
 
 /**

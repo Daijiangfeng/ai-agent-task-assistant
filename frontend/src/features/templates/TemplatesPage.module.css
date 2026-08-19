@@ -1,0 +1,144 @@
+.section {
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: 19px;
+}
+
+.close {
+  border: none;
+  background: none;
+  color: var(--ink-secondary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.close:hover {
+  color: var(--ink);
+}
+
+.center {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-8) 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.templateCard {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.templateHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.templateName {
+  font-size: 17px;
+  font-weight: var(--weight-semibold);
+}
+
+.builtin {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 102, 204, 0.1);
+  color: var(--status-planning);
+}
+
+.category {
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+.description {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.goalPreview {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-secondary);
+  word-break: break-word;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tag {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--parchment);
+  color: var(--ink-secondary);
+}
+
+.templateActions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
+.noVariables {
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 14px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  margin-top: var(--space-3);
+}
+
+.runActions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.createForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}

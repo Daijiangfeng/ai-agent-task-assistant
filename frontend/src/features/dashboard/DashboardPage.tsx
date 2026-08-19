@@ -61,8 +61,6 @@ export default function DashboardPage() {
   const metrics = [
     { label: "任务总数", value: stats.task_total },
     { label: "可用工具", value: stats.tool_count },
-    { label: "知识文档", value: stats.knowledge_document_count },
-    { label: "知识分块", value: stats.knowledge_chunk_count },
   ];
 
   const pendingApprovals = approvalsQuery.data?.tasks ?? [];
@@ -71,7 +69,7 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title="系统概览"
-        subtitle="Agent 运行态势、能力清单与知识库规模一览。"
+        subtitle="Agent 运行态势与能力清单一览。"
       />
 
       <section className={styles.metrics}>

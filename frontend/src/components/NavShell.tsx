@@ -11,7 +11,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/", label: "系统概览", end: true },
   { to: "/tasks", label: "任务控制台" },
   { to: "/templates", label: "任务模板" },
-  { to: "/knowledge", label: "知识库" },
   { to: "/monitoring", label: "执行监控" },
 ];
 

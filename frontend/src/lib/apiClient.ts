@@ -6,11 +6,7 @@
 import type {
   AgentTemplate,
   ApprovalRequest,
-  DeleteDocumentResponse,
-  DocumentListResponse,
   HealthResponse,
-  IngestDocumentResponse,
-  KnowledgeSearchResponse,
   StatsResponse,
   TaskListResponse,
   TaskResponse,
@@ -204,34 +200,5 @@ export const api = {
         method: "POST",
         body,
       }),
-  },
-
-  knowledge: {
-    ingest: (filePath: string) =>
-      request<IngestDocumentResponse>("/knowledge/documents", {
-        method: "POST",
-        body: { file_path: filePath },
-      }),
-    upload: (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
-      return request<IngestDocumentResponse>("/knowledge/upload", {
-        method: "POST",
-        formData: form,
-        timeoutMs: 120_000,
-      });
-    },
-    search: (query: string, topK?: number) =>
-      request<KnowledgeSearchResponse>("/knowledge/search", {
-        method: "POST",
-        body: { query, top_k: topK ?? null },
-      }),
-    listDocuments: () =>
-      request<DocumentListResponse>("/knowledge/documents"),
-    deleteDocument: (source: string) =>
-      request<DeleteDocumentResponse>(
-        `/knowledge/documents?source=${encodeURIComponent(source)}`,
-        { method: "DELETE" },
-      ),
   },
 };

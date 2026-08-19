@@ -125,38 +125,6 @@ export interface HealthResponse {
   version: string;
 }
 
-export interface IngestDocumentResponse {
-  source: string;
-  chunks_indexed: number;
-}
-
-export interface KnowledgeSearchResult {
-  content: string;
-  metadata: Record<string, unknown>;
-  score: number | null;
-}
-
-export interface KnowledgeSearchResponse {
-  query: string;
-  results: KnowledgeSearchResult[];
-}
-
-export interface DocumentInfo {
-  source: string;
-  type: string | null;
-  chunk_count: number;
-}
-
-export interface DocumentListResponse {
-  total: number;
-  documents: DocumentInfo[];
-}
-
-export interface DeleteDocumentResponse {
-  source: string;
-  chunks_deleted: number;
-}
-
 export interface ToolInfo {
   name: string;
   description: string;
@@ -172,8 +140,6 @@ export interface StatsResponse {
   task_total: number;
   tasks_by_status: Record<string, number>;
   tool_count: number;
-  knowledge_document_count: number;
-  knowledge_chunk_count: number;
 }
 
 /** 终态：到达后停止轮询。 */

@@ -7,7 +7,6 @@ const DashboardPage = lazy(() => import("./features/dashboard/DashboardPage"));
 const TasksPage = lazy(() => import("./features/tasks/TasksPage"));
 const TaskDetailPage = lazy(() => import("./features/tasks/TaskDetailPage"));
 const TemplatesPage = lazy(() => import("./features/templates/TemplatesPage"));
-const KnowledgePage = lazy(() => import("./features/knowledge/KnowledgePage"));
 const MonitoringPage = lazy(() => import("./features/monitoring/MonitoringPage"));
 
 export default function App() {
@@ -25,7 +24,6 @@ export default function App() {
           <Route path="tasks" element={<TasksPage />} />
           <Route path="tasks/:taskId" element={<TaskDetailPage />} />
           <Route path="templates" element={<TemplatesPage />} />
-          <Route path="knowledge" element={<KnowledgePage />} />
           <Route path="monitoring" element={<MonitoringPage />} />
           <Route path="monitoring/:taskId" element={<MonitoringPage />} />
           <Route path="*" element={<DashboardPage />} />
