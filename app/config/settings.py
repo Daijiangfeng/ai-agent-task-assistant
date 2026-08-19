@@ -6,11 +6,14 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根目录（ai-agent-task-assistant/）
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+ENVIRONMENT_DEVELOPMENT = "development"
+ENVIRONMENT_PRODUCTION = "production"
 
 
 class Settings(BaseSettings):
@@ -20,6 +23,33 @@ class Settings(BaseSettings):
     APP_NAME: str = "AI Agent Task Assistant"
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
+
+    # ---- 运行环境（P0-1 生产安全模式） ----
+    ENVIRONMENT: str = Field(
+        default=ENVIRONMENT_DEVELOPMENT,
+        description=(
+            "运行环境：development | production。production 下禁止一切静默降级"
+            "（内存任务存储 / MemorySaver / 内存队列 / 内存短期记忆 / Mock 工具），"
+            "核心基础设施不可用时启动失败或拒绝接收任务。"
+        ),
+    )
+
+    @field_validator("ENVIRONMENT", mode="before")
+    @classmethod
+    def _normalize_environment(cls, value: str) -> str:
+        """规范化运行环境取值（大小写不敏感），非法值直接报配置错误。"""
+        normalized = str(value or "").strip().lower()
+        if normalized not in (ENVIRONMENT_DEVELOPMENT, ENVIRONMENT_PRODUCTION):
+            raise ValueError(
+                "ENVIRONMENT 仅支持 development | production，"
+                f"收到: {value!r}"
+            )
+        return normalized
+
+    @property
+    def is_production(self) -> bool:
+        """是否生产环境（禁止静默降级、启动即校验基础设施）。"""
+        return self.ENVIRONMENT == ENVIRONMENT_PRODUCTION
 
     # ---- CORS ----
     CORS_ORIGINS: list[str] = Field(
@@ -120,12 +150,12 @@ class Settings(BaseSettings):
         default=[], description="低质/内容农场域名"
     )
 
-    # ---- Chroma 向量库 ----
+    # ---- Chroma 向量库（长期记忆后端存储） ----
     CHROMA_PERSIST_DIR: str = Field(
         default="", description="Chroma 持久化目录，留空则用 data/chroma"
     )
 
-    # ---- 向量库后端（可插拔） ----
+    # ---- 向量库后端（可插拔，长期记忆使用） ----
     # chroma: 进程内持久化，适合开发/单机 Demo；
     # pgvector: PostgreSQL 扩展，适合生产多实例部署（Milvus/Qdrant 可同理扩展）。
     VECTOR_STORE_BACKEND: str = Field(
@@ -138,53 +168,6 @@ class Settings(BaseSettings):
             "pgvector 建表向量维度，必须与 embedding 模型输出一致"
             "（智谱 embedding-3 默认 2048）"
         ),
-    )
-
-    # ---- RAG 配置 ----
-    RAG_CHUNK_SIZE: int = Field(default=800, ge=100)
-    RAG_CHUNK_OVERLAP: int = Field(default=100, ge=0)
-    RAG_TOP_K: int = Field(default=5, ge=1, le=50)
-
-    # ---- RAG 动态分块（按文档类型选择 chunk 参数） ----
-    # 开启后按文档 type/扩展名匹配分块画像：代码类大块（1500/150），
-    # 法律类小块（500/50），其余用 RAG_CHUNK_SIZE/RAG_CHUNK_OVERLAP 默认值。
-    RAG_DYNAMIC_CHUNKING: bool = Field(
-        default=True, description="是否按文档类型动态选择分块参数"
-    )
-
-    # ---- RAG Hybrid Search（BM25 + 向量检索 RRF 融合） ----
-    ENABLE_HYBRID_SEARCH: bool = Field(
-        default=False,
-        description=(
-            "是否启用混合检索：BM25 关键词召回 + 向量语义召回经 "
-            "Reciprocal Rank Fusion 融合（提升专有名词/编号/型号命中）"
-        ),
-    )
-    HYBRID_VECTOR_RECALL_K: int = Field(
-        default=20, ge=1, le=128, description="混合检索中向量召回候选数"
-    )
-    HYBRID_BM25_RECALL_K: int = Field(
-        default=20, ge=1, le=128, description="混合检索中 BM25 关键词召回候选数"
-    )
-    HYBRID_RRF_K: int = Field(
-        default=60, ge=1, description="RRF 融合常数（k，越大越平滑）"
-    )
-
-    # ---- RAG Rerank 精排配置（智谱 rerank 模型） ----
-    ENABLE_RERANK: bool = Field(
-        default=False, description="是否启用召回后 rerank 精排（需 ANTHROPIC_AUTH_TOKEN）"
-    )
-    ZHIPU_RERANK_MODEL: str = Field(
-        default="rerank", description="智谱 Rerank 模型编码"
-    )
-    RETRIEVAL_TOP_K: int = Field(
-        default=20, ge=1, le=128, description="向量召回候选数（rerank 前，API 上限 128）"
-    )
-    RERANK_TOP_K: int = Field(
-        default=5, ge=1, description="rerank 精排后保留的结果数"
-    )
-    RERANK_SCORE_THRESHOLD: float = Field(
-        default=0.0, ge=0.0, le=1.0, description="rerank 相关性分数阈值，低于阈值的片段被过滤"
     )
 
     # ---- SQLite 沙箱（SQL Query 工具） ----
@@ -280,6 +263,19 @@ class Settings(BaseSettings):
     )
     QUEUE_DEQUEUE_TIMEOUT: float = Field(
         default=1.0, ge=0.1, le=30, description="Worker 拉取任务超时（秒）"
+    )
+
+    # ---- 健康检查（P0-1 生产安全模式） ----
+    HEALTH_CHECK_TIMEOUT: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=30,
+        description="基础设施健康检查中单个组件的探测超时（秒）",
+    )
+    HEALTH_CACHE_TTL: float = Field(
+        default=5.0,
+        ge=0.0,
+        description="就绪状态缓存 TTL（秒）；0 表示每次实时探测",
     )
 
     # ---- 计算属性 ----
