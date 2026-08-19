@@ -38,6 +38,11 @@ class MemoryFactory:
         """
         settings = settings or get_settings()
         if not use_redis:
+            if settings.is_production:
+                raise RuntimeError(
+                    "生产环境短期记忆必须使用 Redis（禁止内存实现，"
+                    "多实例不共享且重启丢失）"
+                )
             return InMemoryShortTermMemory()
         return RedisShortTermMemory(settings)
 

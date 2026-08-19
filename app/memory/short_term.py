@@ -96,10 +96,15 @@ class RedisShortTermMemory(BaseMemory):
 
     value 以 JSON 序列化存储，支持 TTL。
     初始化时尝试连接 Redis，失败则降级到 InMemoryShortTermMemory。
+
+    strict 模式（生产环境，ENVIRONMENT=production 自动启用）：
+    Redis 初始化/连接失败直接抛错，禁止静默降级内存实现。
     """
 
-    def __init__(self, settings: Settings | None = None):
+    def __init__(self, settings: Settings | None = None, strict: bool | None = None):
         self._settings = settings or get_settings()
+        # strict 缺省跟随运行环境：生产禁止降级，开发允许降级
+        self._strict = self._settings.is_production if strict is None else strict
         self._fallback = InMemoryShortTermMemory()
         self._redis = None
         self._degraded = False
@@ -114,17 +119,31 @@ class RedisShortTermMemory(BaseMemory):
                 decode_responses=True,
             )
         except Exception as exc:  # pragma: no cover - 依赖缺失或配置错误
+            if self._strict:
+                raise RuntimeError(
+                    f"生产环境 Redis 短期记忆初始化失败（禁止降级内存）: {exc}"
+                ) from exc
             logger.warning("Redis 初始化失败，降级为内存短期记忆", error=str(exc))
             self._degraded = True
 
     async def _ensure_connection(self) -> bool:
-        """确认 Redis 可用，不可用则标记降级。"""
+        """确认 Redis 可用；不可用时开发模式降级内存，生产模式抛错。"""
         if self._degraded or self._redis is None:
+            if self._strict:
+                raise RuntimeError(
+                    "生产环境 Redis 短期记忆不可用（禁止降级内存），"
+                    "请检查 Redis 连接配置"
+                )
             return False
         try:
             await self._redis.ping()
             return True
         except Exception as exc:
+            if self._strict:
+                raise RuntimeError(
+                    "生产环境 Redis 短期记忆不可用（禁止降级内存），"
+                    f"请检查 Redis 连接配置: {exc}"
+                ) from exc
             logger.warning("Redis 连接不可用，降级为内存", error=str(exc))
             self._degraded = True
             return False

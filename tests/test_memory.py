@@ -11,7 +11,7 @@ from app.config.settings import Settings
 from app.memory.factory import MemoryFactory
 from app.memory.long_term import VectorLongTermMemory
 from app.memory.short_term import InMemoryShortTermMemory, RedisShortTermMemory
-from app.rag.vector_store import ChromaStore
+from app.memory.vector_store import ChromaStore
 
 
 class TestInMemoryShortTermMemory:

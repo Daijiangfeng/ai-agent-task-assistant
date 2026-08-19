@@ -1,7 +1,7 @@
 """
-向量存储抽象层。
+向量存储抽象层（长期记忆的后端存储）。
 
-- BaseVectorStore: 统一接口，RAG 与长期记忆只依赖该抽象，
+- BaseVectorStore: 统一接口，长期记忆（VectorLongTermMemory）只依赖该抽象，
   后端可插拔（chroma / pgvector / 未来 Milvus、Qdrant）。
 - ChromaStore: 基于 chromadb PersistentClient 的进程内持久化实现，
   适合开发与单机 Demo。
@@ -345,7 +345,7 @@ def create_vector_store(settings: Settings | None = None) -> BaseVectorStore:
         return ChromaStore(settings.chroma_dir)
 
     if backend == "pgvector":
-        from app.rag.vector_store_pg import PgVectorStore
+        from app.memory.vector_store_pg import PgVectorStore
 
         return PgVectorStore(settings)
 

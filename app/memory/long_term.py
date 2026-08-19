@@ -17,7 +17,7 @@ from app.config.settings import Settings, get_settings
 from app.llm.embeddings import BaseEmbeddingProvider
 from app.llm.factory import create_embedding_provider
 from app.memory.base import DEFAULT_TENANT_ID, DEFAULT_USER_ID, BaseMemory
-from app.rag.vector_store import BaseVectorStore, create_vector_store
+from app.memory.vector_store import BaseVectorStore, create_vector_store
 
 logger = get_logger(__name__)
 
