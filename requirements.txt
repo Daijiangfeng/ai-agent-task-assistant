@@ -9,8 +9,6 @@ python-multipart>=0.0.9
 langchain>=0.3.0
 langchain-openai>=0.2.0
 langchain-anthropic>=0.3.0
-# app/rag/splitter.py 直接依赖 langchain_text_splitters；新版 langchain 不再传递引入，需显式声明。
-langchain-text-splitters>=0.3.0
 anthropic>=0.39.0
 langgraph>=0.2.0
 # 任务/检查点持久化：LangGraph Checkpoint 的 PostgreSQL 后端（AsyncPostgresSaver）
@@ -18,23 +16,22 @@ langgraph-checkpoint-postgres>=2.0.0
 
 # Database
 sqlalchemy[asyncio]>=2.0.0
+# 数据库结构迁移（Alembic；生产部署执行 alembic upgrade head）
+alembic>=1.13.0
 # 异步驱动：PostgreSQL(asyncpg) / SQLite(aiosqlite)；psycopg 供 pgvector 向量库与 checkpoint 探测
 asyncpg>=0.29.0
 aiosqlite>=0.20.0
 psycopg[binary]>=3.2.0
-# pgvector 向量库后端（生产多实例部署时替代 Chroma）
+# pgvector 向量库后端（长期记忆；生产多实例部署时替代 Chroma）
 pgvector>=0.3.0
 
 # Redis
 redis>=5.0.0
 
-# RAG & Vector Store
+# 长期记忆向量库（Chroma 开发/单机）+ 文件解析（file_processing 工具：PDF/DOCX）
 chromadb>=0.5.0
 pypdf>=5.0.0
 python-docx>=1.1.0
-# Hybrid Search：BM25 关键词召回（纯 Python）+ 中文分词
-rank-bm25>=0.2.2
-jieba>=0.42.1
 
 # Tools
 tavily-python>=0.5.0

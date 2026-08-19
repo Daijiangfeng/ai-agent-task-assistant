@@ -1,16 +1,15 @@
 """智能任务执行助手 智谱 API 联调自测（阶段 2）。
 
-在项目自身 venv 内运行，直测 LLM/RAG/工具层（不依赖 PG/Redis/RabbitMQ/Milvus）：
+在项目自身 venv 内运行，直测 LLM/Embedding/工具层（不依赖 PG/Redis）：
   1. 配置校验（ZHIPU_MODEL=glm-4.5-air、ANTHROPIC_AUTH_TOKEN 已配）
   2. 普通 Chat（ZhipuProvider.chat_completion 同步，Anthropic 兼容端点）
   3. 异步链路（achat_completion + AsyncAnthropic）
   4. LangChain ChatAnthropic（Agent Planner/Executor 同款调用路径）ainvoke
   5. 流式输出（AsyncAnthropic messages.stream）
   6. 模型切换（kwargs model 覆盖 glm-4.6）
-  7. RAG Embedding（embedding-3，OpenAI 兼容端点）
-  8. RAG Rerank（智谱 rerank 模型精排）
-  9. 工具调用：Tavily Web 搜索（统一密钥）
- 10. Agent 完整工作流（需 LangGraph 全依赖 -> 以 Planner 同款链路代表，全流程标注）
+  7. Embedding（embedding-3，长期记忆向量化使用）
+  8. 工具调用：Tavily Web 搜索（统一密钥）
+  9. Agent 完整工作流（需 LangGraph 全依赖 -> 以 Planner 同款链路代表，全流程标注）
 
 用法：ai-agent-task-assistant 目录下 `venv\\Scripts\\python.exe scripts\\zhipu_selftest.py`
 """
@@ -121,17 +120,14 @@ async def main() -> None:
                        model="glm-4.6", max_tokens=2048)[:80],
                    "model_requested": "glm-4.6"})
 
-    # 7. RAG Embedding（embedding-3）
+    # 7. Embedding（embedding-3，长期记忆向量化使用）
     def _embed():
         ep = create_embedding_provider(settings)
         vec = ep.embed_query("智谱联调测试")
         return {"note": f"embedding-3 维度={len(vec)}", "ok": len(vec) >= 1024}
-    timed("rag_embedding3", "rag", _embed)
+    timed("embedding3", "embedding", _embed)
 
-    # 8. RAG Rerank
-    await timed_async("rag_zhipu_rerank", "rag", lambda: _rerank(settings))
-
-    # 9. 工具调用：Tavily Web 搜索
+    # 8. 工具调用：Tavily Web 搜索
     await timed_async("tool_web_search_tavily", "tool", lambda: _tavily(settings))
 
     # 10. Agent 完整工作流（LangGraph 全链需 PG/Redis 会话存储 -> 标注降级）
@@ -177,23 +173,6 @@ async def _stream(provider, settings):
             chunks.append(text)
     return {"response_excerpt": "".join(chunks)[:120], "stream_chunks": len(chunks),
             "ok": bool(chunks)}
-
-
-async def _rerank(settings):
-    from app.rag.base import Document
-    from app.rag.reranker import ZhipuReranker
-
-    docs = [
-        Document(content="RAG 是检索增强生成，将外部知识注入大模型上下文。", metadata={}),
-        Document(content="今天天气很好，适合出门散步。", metadata={}),
-        Document(content="向量数据库用于存储文本的稠密向量表示。", metadata={}),
-    ]
-    rr = ZhipuReranker(settings)
-    ranked = await rr.rerank("什么是检索增强生成", docs, top_n=2)
-    top = ranked[0].content if ranked else ""
-    top_score = ranked[0].metadata.get("rerank_score") if ranked else None
-    return {"note": f"top1={top[:40]}, score={top_score}",
-            "ok": bool(ranked) and "RAG" in top}
 
 
 async def _tavily(settings):
