@@ -18,7 +18,34 @@ def disable_rerank(monkeypatch):
     避免直接构造 Settings() 的用例读到 .env 的 ENABLE_RERANK=true 而触发真实网络调用。
     需要 rerank 的用例请显式传 Settings(ENABLE_RERANK=True) 或注入 mock reranker。
     """
+    from app.config.settings import get_settings
+
     monkeypatch.setenv("ENABLE_RERANK", "false")
+    # Settings 带 lru_cache：清除缓存使本次测试的 env 覆盖 .env
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def isolated_queue_and_trace(monkeypatch):
+    """
+    异步化架构的测试隔离：
+    - 任务队列强制内存后端（避免 auto 模式探测/连接真实 Redis）；
+    - 关闭应用内嵌 Worker（API 测试只验证入队，不触发真实执行）；
+    - 每个用例前重置队列单例与 Trace 记录器。
+    """
+    from app.config.settings import get_settings
+
+    monkeypatch.setenv("TASK_QUEUE_BACKEND", "memory")
+    monkeypatch.setenv("TASK_QUEUE_EMBEDDED_WORKER", "false")
+    # Settings 带 lru_cache：清除缓存使 TASK_QUEUE_BACKEND=memory 生效，
+    # 避免 create_task_queue 走 auto 分支触发 48s Redis 连接超时探测
+    get_settings.cache_clear()
+    from app.api.deps import reset_task_queue
+
+    reset_task_queue()
+    from app.tracing.recorder import get_trace_recorder
+
+    get_trace_recorder().clear()
 
 
 @pytest.fixture

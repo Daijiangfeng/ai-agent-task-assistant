@@ -9,6 +9,9 @@ const CASES: Array<[TaskStatus, string]> = [
   ["executing", "执行中"],
   ["reflecting", "反思中"],
   ["replanning", "重规划"],
+  ["awaiting_approval", "待审批"],
+  ["paused", "已暂停"],
+  ["cancelled", "已取消"],
   ["completed", "已完成"],
   ["failed", "失败"],
 ];

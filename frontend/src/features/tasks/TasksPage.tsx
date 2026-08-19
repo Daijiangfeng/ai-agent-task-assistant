@@ -118,6 +118,11 @@ export default function TasksPage() {
               rows={listQuery.data.tasks}
               rowKey={(row) => row.task_id}
               onRowClick={(row) => navigate(`/tasks/${row.task_id}`)}
+              rowClassName={(row) =>
+                row.status === "awaiting_approval"
+                  ? styles.awaitingRow
+                  : undefined
+              }
             />
           ) : (
             <EmptyState

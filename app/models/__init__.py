@@ -9,7 +9,13 @@ from app.models.api_schemas import (
     TaskStatusResponse,
 )
 from app.models.plan import Plan, ReflectionResult
-from app.models.task import SubTask, Task, TaskStatus
+from app.models.task import (
+    ApprovalRequest,
+    ApprovalStatus,
+    SubTask,
+    Task,
+    TaskStatus,
+)
 
 # 注入 Plan / ReflectionResult 到 task 模块命名空间并重建 Task 模型，
 # 解析其对 Plan / ReflectionResult 的前向引用（打破 task.py <-> plan.py 循环导入）。
@@ -21,6 +27,8 @@ __all__ = [
     "TaskStatus",
     "SubTask",
     "Task",
+    "ApprovalRequest",
+    "ApprovalStatus",
     "Plan",
     "ReflectionResult",
     "CreateTaskRequest",

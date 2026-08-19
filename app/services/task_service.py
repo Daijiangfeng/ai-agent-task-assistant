@@ -20,7 +20,13 @@ from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
 from app.models.api_schemas import TaskResponse, TaskStatusResponse
 from app.models.plan import Plan, ReflectionResult
-from app.models.task import SubTask, Task, TaskStatus
+from app.models.task import (
+    ApprovalRequest,
+    ApprovalStatus,
+    SubTask,
+    Task,
+    TaskStatus,
+)
 from app.services.task_repository import (
     MEMORY_BACKEND,
     POSTGRES_BACKEND,
@@ -186,6 +192,7 @@ class TaskService:
         offset: int = 0,
         owner_id: str | None = None,
         tenant_id: str | None = None,
+        status: TaskStatus | None = None,
     ) -> list[Task]:
         """
         列表查询任务。
@@ -195,6 +202,7 @@ class TaskService:
             offset: 偏移量。
             owner_id: 仅返回该所有者的任务；None 表示全部（admin 视角）。
             tenant_id: 仅返回该租户的任务；None 表示全部（admin 视角）。
+            status: 仅返回该状态的任务；None 表示不限。
 
         Returns:
             Task 列表。
@@ -205,6 +213,7 @@ class TaskService:
             offset=offset,
             owner_id=owner_id,
             tenant_id=tenant_id,
+            status=status,
         )
 
     async def get_task_count(
@@ -312,6 +321,122 @@ class TaskService:
         task.updated_at = _utcnow_iso()
         await repo.update(task)
 
+    # ---- 多 Agent 协作 ----
+
+    async def sync_execution_mode(self, task_id: str, mode: str | None) -> None:
+        """记录执行模式（single / multi_agent）。"""
+        repo = await self._get_repo()
+        task = await repo.get(task_id)
+        if not task:
+            return
+        task.execution_mode = mode
+        task.updated_at = _utcnow_iso()
+        await repo.update(task)
+
+    async def sync_agent_results(
+        self, task_id: str, agent_results: list[dict]
+    ) -> None:
+        """记录多 Agent 模式下各子 Agent 的执行结果。"""
+        repo = await self._get_repo()
+        task = await repo.get(task_id)
+        if not task or not agent_results:
+            return
+        task.agent_results = list(task.agent_results or []) + list(agent_results)
+        task.updated_at = _utcnow_iso()
+        await repo.update(task)
+
+    # ---- Human-in-the-loop 审批 ----
+
+    async def save_approval_request(self, request: ApprovalRequest) -> None:
+        """记录待审批请求（同一任务同时仅有一个待审批请求）。"""
+        repo = await self._get_repo()
+        task = await repo.get(request.task_id)
+        if not task:
+            return
+        task.pending_approval = request
+        task.approval_history = list(task.approval_history or []) + [request]
+        task.updated_at = _utcnow_iso()
+        await repo.update(task)
+
+    async def resolve_approval(
+        self,
+        task_id: str,
+        approval_id: str,
+        status: ApprovalStatus,
+        note: str | None = None,
+        modified_args: dict | None = None,
+    ) -> ApprovalRequest | None:
+        """
+        决策审批请求（批准/拒绝），返回决策后的请求；不存在或已决策返回 None。
+
+        批准时可携带修改后的工具参数（modified_args），供 Agent 按新参数执行。
+        """
+        repo = await self._get_repo()
+        task = await repo.get(task_id)
+        if not task or not task.pending_approval:
+            return None
+        request = task.pending_approval
+        if request.id != approval_id:
+            return None
+        if request.status != ApprovalStatus.PENDING:
+            return None
+        request.status = status
+        request.decided_at = _utcnow_iso()
+        request.decision_note = note
+        request.modified_args = modified_args
+        task.pending_approval = None
+        history = list(task.approval_history or [])
+        for i, item in enumerate(history):
+            if item.id == approval_id:
+                history[i] = request
+                break
+        task.approval_history = history
+        task.updated_at = _utcnow_iso()
+        await repo.update(task)
+        return request
+
+    async def get_pending_approvals(self, task_id: str) -> list[ApprovalRequest]:
+        """获取任务的全部待审批请求。"""
+        repo = await self._get_repo()
+        task = await repo.get(task_id)
+        if not task:
+            return []
+        return [
+            a for a in (task.approval_history or [])
+            if a.status == ApprovalStatus.PENDING
+        ]
+
+    # ---- 重试 / 重置 ----
+
+    async def reset_task_for_retry(
+        self, task_id: str, from_index: int | None = None
+    ) -> Task | None:
+        """
+        重置任务以便重新执行。
+
+        - from_index 为 None：清空结果、错误与反思，子任务全部重置为 PENDING，
+          下次执行从头重新规划；
+        - from_index >= 0：保留前 from_index 个子任务结果，其余重置为 PENDING，
+          下次执行从该索引继续（基于已有计划）。
+        """
+        repo = await self._get_repo()
+        task = await repo.get(task_id)
+        if not task:
+            return None
+        task.final_result = None
+        task.error = None
+        task.reflection = None
+        for i, subtask in enumerate(task.subtasks):
+            if from_index is not None and i < from_index:
+                continue
+            subtask.status = TaskStatus.PENDING
+            subtask.result = None
+            subtask.error = None
+            subtask.tool_used = None
+        task.updated_at = _utcnow_iso()
+        await repo.update(task)
+        return task
+
     async def get_task_status_response(self, task_id: str) -> TaskStatusResponse | None:
         """
         获取任务状态响应（用于 API 返回）。
@@ -351,6 +476,10 @@ class TaskService:
             reflection=task.reflection,
             iteration_count=task.iteration_count,
             plan_version=task.plan_version,
+            execution_mode=task.execution_mode,
+            agent_results=task.agent_results,
+            pending_approval=task.pending_approval,
+            approval_history=task.approval_history,
             error=task.error,
             final_result=task.final_result,
         )

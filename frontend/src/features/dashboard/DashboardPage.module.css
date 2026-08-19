@@ -95,6 +95,91 @@
   margin-bottom: var(--space-6);
 }
 
+.approvalsSection {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.approvalsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.approvalsLink {
+  font-size: 14px;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.approvalsLink:hover {
+  text-decoration: underline;
+}
+
+.approvalBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: var(--space-2);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--status-approval);
+  color: #fff;
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.approvalList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.approvalItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: var(--ink);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.approvalItem:hover {
+  border-color: var(--status-approval);
+  background: rgba(255, 152, 0, 0.06);
+}
+
+.approvalGoal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approvalTime {
+  flex: none;
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+.hint {
+  margin: var(--space-3) 0 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
 .tools {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -126,7 +211,8 @@
     grid-template-columns: repeat(2, 1fr);
   }
   .grid,
-  .tools {
+  .tools,
+  .approvalsSection {
     grid-template-columns: 1fr;
   }
 }

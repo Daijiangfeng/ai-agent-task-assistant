@@ -6,6 +6,11 @@ Prompt 模板统一管理器。
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.prompts.executor import EXECUTOR_PROMPT
+from app.prompts.multi_agent import (
+    REVIEWER_PROMPT,
+    SUB_AGENT_PROMPT,
+    SUPERVISOR_PROMPT,
+)
 from app.prompts.planner import PLANNER_PROMPT, REPLANNER_PROMPT
 from app.prompts.reflection import REFLECTION_PROMPT
 
@@ -70,9 +75,27 @@ class PromptManager:
         return cls.get("reflection")
 
     @classmethod
+    def get_supervisor_prompt(cls) -> ChatPromptTemplate:
+        """获取 Supervisor Prompt 模板。"""
+        return cls.get("supervisor")
+
+    @classmethod
+    def get_sub_agent_prompt(cls) -> ChatPromptTemplate:
+        """获取子 Agent Prompt 模板。"""
+        return cls.get("sub_agent")
+
+    @classmethod
+    def get_reviewer_prompt(cls) -> ChatPromptTemplate:
+        """获取 Reviewer Prompt 模板。"""
+        return cls.get("reviewer")
+
+    @classmethod
     def init_defaults(cls) -> None:
         """注册所有默认 Prompt 模板。在应用启动时调用。"""
         cls.register("planner", PLANNER_PROMPT)
         cls.register("replanner", REPLANNER_PROMPT)
         cls.register("executor", EXECUTOR_PROMPT)
         cls.register("reflection", REFLECTION_PROMPT)
+        cls.register("supervisor", SUPERVISOR_PROMPT)
+        cls.register("sub_agent", SUB_AGENT_PROMPT)
+        cls.register("reviewer", REVIEWER_PROMPT)

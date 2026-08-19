@@ -8,7 +8,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.models.plan import Plan, ReflectionResult
-from app.models.task import SubTask, TaskStatus
+from app.models.task import ApprovalRequest, SubTask, TaskStatus
 
 
 class CreateTaskRequest(BaseModel):
@@ -43,6 +43,18 @@ class TaskStatusResponse(BaseModel):
     )
     iteration_count: int = Field(default=0, description="重规划迭代次数")
     plan_version: int = Field(default=1, description="计划版本号")
+    execution_mode: str | None = Field(
+        default=None, description="执行模式: single | multi_agent"
+    )
+    agent_results: list[dict] = Field(
+        default_factory=list, description="多 Agent 模式下各子 Agent 结果"
+    )
+    pending_approval: ApprovalRequest | None = Field(
+        default=None, description="待处理的人工审批请求"
+    )
+    approval_history: list[ApprovalRequest] = Field(
+        default_factory=list, description="历史审批记录"
+    )
     error: str | None = Field(default=None, description="全局错误信息")
     final_result: str | None = Field(default=None, description="最终执行结果")
 
@@ -144,3 +156,97 @@ class StatsResponse(BaseModel):
     tool_count: int = Field(description="已注册工具数")
     knowledge_document_count: int = Field(description="知识库文档数（按来源去重）")
     knowledge_chunk_count: int = Field(description="知识库分块总数")
+
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop 审批 / 任务控制 / 重试
+# ---------------------------------------------------------------------------
+
+
+class ApprovalDecideRequest(BaseModel):
+    """审批决策请求体（批准 / 拒绝共用）。"""
+
+    note: str | None = Field(default=None, max_length=2000, description="决策备注")
+    modified_args: dict | None = Field(
+        default=None, description="批准时修改后的工具参数（可选）"
+    )
+
+
+class RetryTaskRequest(BaseModel):
+    """任务重试请求体。"""
+
+    from_index: int | None = Field(
+        default=None,
+        ge=0,
+        description="从指定子任务索引重新执行；不传则从头重新规划执行",
+    )
+
+
+# ---------------------------------------------------------------------------
+# 任务模板 / Agent Skill
+# ---------------------------------------------------------------------------
+
+
+class AgentTemplateCreate(BaseModel):
+    """创建任务模板请求体。"""
+
+    name: str = Field(min_length=1, max_length=100, description="模板名称")
+    description: str = Field(default="", max_length=2000, description="模板描述")
+    category: str = Field(
+        default="general",
+        description="模板类别（market_research/document_analysis/code_review/general 等）",
+    )
+    goal_template: str = Field(
+        min_length=1, max_length=10000, description="目标模板，支持 {var} 变量占位"
+    )
+    context_template: str | None = Field(
+        default=None, max_length=50000, description="上下文模板，支持 {var} 变量占位"
+    )
+    tags: list[str] = Field(default_factory=list, description="标签")
+
+
+class AgentTemplateUpdate(BaseModel):
+    """更新任务模板请求体（全部可选，仅更新传入字段）。"""
+
+    name: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=2000)
+    category: str | None = Field(default=None)
+    goal_template: str | None = Field(default=None, max_length=10000)
+    context_template: str | None = Field(default=None, max_length=50000)
+    tags: list[str] | None = Field(default=None)
+
+
+class AgentTemplateResponse(BaseModel):
+    """任务模板响应体。"""
+
+    id: str = Field(description="模板 ID")
+    name: str = Field(description="模板名称")
+    description: str = Field(description="模板描述")
+    category: str = Field(description="模板类别")
+    goal_template: str = Field(description="目标模板")
+    context_template: str | None = Field(default=None, description="上下文模板")
+    tags: list[str] = Field(default_factory=list, description="标签")
+    variables: list[str] = Field(
+        default_factory=list, description="模板中的变量占位符列表"
+    )
+    is_builtin: bool = Field(description="是否为内置模板")
+    created_at: str = Field(description="创建时间")
+    updated_at: str = Field(description="更新时间")
+
+
+class TemplateListResponse(BaseModel):
+    """模板列表响应体。"""
+
+    total: int = Field(description="模板总数")
+    templates: list[AgentTemplateResponse] = Field(description="模板列表")
+
+
+class TemplateRunRequest(BaseModel):
+    """基于模板创建任务请求体。"""
+
+    inputs: dict[str, str] = Field(
+        default_factory=dict, description="模板变量值，用于渲染 goal/context"
+    )
+    auto_execute: bool = Field(
+        default=False, description="创建后是否立即入队执行"
+    )

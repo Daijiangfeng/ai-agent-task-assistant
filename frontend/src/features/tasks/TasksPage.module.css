@@ -33,6 +33,10 @@
   font-size: 14px;
 }
 
+.awaitingRow {
+  background: rgba(255, 152, 0, 0.08) !important;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;

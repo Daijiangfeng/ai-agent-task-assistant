@@ -19,8 +19,57 @@ class TaskStatus(str, Enum):
     EXECUTING = "executing"
     REFLECTING = "reflecting"
     REPLANNING = "replanning"
+    AWAITING_APPROVAL = "awaiting_approval"
+    PAUSED = "paused"
+    CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+# 可再次执行（重新入队）的状态
+RESTARTABLE_STATUSES = frozenset(
+    {
+        TaskStatus.PENDING,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLED,
+        TaskStatus.PAUSED,
+        TaskStatus.COMPLETED,
+    }
+)
+
+
+class ApprovalStatus(str, Enum):
+    """工具审批请求状态。"""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class ApprovalRequest(BaseModel):
+    """
+    Human-in-the-loop 审批请求。
+
+    Agent 准备执行高风险动作（如删除知识库文档）时暂停执行，
+    等待用户批准 / 拒绝 / 修改参数后再继续。
+    """
+
+    id: str = Field(description="审批请求唯一标识")
+    task_id: str = Field(description="所属任务 ID")
+    tool_name: str = Field(description="请求调用的工具名称")
+    args: dict = Field(default_factory=dict, description="工具调用参数（详情供用户审阅）")
+    reason: str = Field(default="", description="请求审批的原因说明")
+    status: ApprovalStatus = Field(
+        default=ApprovalStatus.PENDING, description="审批状态"
+    )
+    created_at: str = Field(description="请求创建时间（ISO 格式）")
+    decided_at: str | None = Field(default=None, description="决策时间（ISO 格式）")
+    decision_note: str | None = Field(
+        default=None, description="用户决策备注（拒绝原因 / 修改说明）"
+    )
+    modified_args: dict | None = Field(
+        default=None, description="用户修改后的工具参数（批准时可选）"
+    )
 
 
 class SubTask(BaseModel):
@@ -61,6 +110,18 @@ class Task(BaseModel):
     )
     plan_version: int = Field(default=1, description="计划版本号")
     iteration_count: int = Field(default=0, description="重规划迭代次数")
+    execution_mode: str | None = Field(
+        default=None, description="执行模式: single（单 Agent）| multi_agent（多 Agent 协作）"
+    )
+    agent_results: list[dict] = Field(
+        default_factory=list, description="多 Agent 协作模式下各子 Agent 的执行结果"
+    )
+    pending_approval: ApprovalRequest | None = Field(
+        default=None, description="待处理的人工审批请求（Human-in-the-loop）"
+    )
+    approval_history: list[ApprovalRequest] = Field(
+        default_factory=list, description="历史审批记录（含已决策的）"
+    )
     final_result: str | None = Field(default=None, description="最终执行结果")
     error: str | None = Field(default=None, description="全局错误信息")
     created_at: str = Field(description="创建时间（ISO 格式）")

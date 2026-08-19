@@ -89,3 +89,43 @@ class TaskForbiddenException(AppException):
             message=f"无权访问任务 {task_id}",
             status_code=status.HTTP_403_FORBIDDEN,
         )
+
+
+class QueueUnavailableException(AppException):
+    """任务队列不可用（入队失败，服务过载或后端不可达）。"""
+
+    def __init__(self, reason: str):
+        super().__init__(
+            message=f"任务队列不可用，请稍后重试: {reason}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
+class ApprovalNotFoundException(AppException):
+    """审批请求不存在（任务无对应待审批请求）。"""
+
+    def __init__(self, task_id: str, approval_id: str):
+        super().__init__(
+            message=f"任务 {task_id} 不存在审批请求 {approval_id}",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+
+class ApprovalAlreadyDecidedException(AppException):
+    """审批请求已被决策，不能重复处理。"""
+
+    def __init__(self, approval_id: str):
+        super().__init__(
+            message=f"审批请求 {approval_id} 已被处理，不能重复决策",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class TemplateNotFoundException(AppException):
+    """任务模板不存在。"""
+
+    def __init__(self, template_id: str):
+        super().__init__(
+            message=f"任务模板 {template_id} 不存在",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )

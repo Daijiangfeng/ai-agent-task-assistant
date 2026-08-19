@@ -4,6 +4,8 @@
  */
 
 import type {
+  AgentTemplate,
+  ApprovalRequest,
   DeleteDocumentResponse,
   DocumentListResponse,
   HealthResponse,
@@ -13,6 +15,8 @@ import type {
   TaskListResponse,
   TaskResponse,
   TaskStatusResponse,
+  TemplateListResponse,
+  TemplateRunRequest,
   ToolListResponse,
 } from "./types";
 
@@ -101,7 +105,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 export const api = {
   request,
 
-  health: () => request<HealthResponse>("/health", { absolute: true }),
+  health: () => request<HealthResponse>("/health"),
 
   stats: {
     get: () => request<StatsResponse>("/stats"),
@@ -118,11 +122,88 @@ export const api = {
         method: "POST",
         body: { goal, context: context || null },
       }),
-    list: (limit = 20, offset = 0) =>
-      request<TaskListResponse>(`/tasks/?limit=${limit}&offset=${offset}`),
+    list: (limit = 20, offset = 0, status?: string) =>
+      request<TaskListResponse>(
+        status
+          ? `/tasks/?limit=${limit}&offset=${offset}&status=${status}`
+          : `/tasks/?limit=${limit}&offset=${offset}`,
+      ),
     get: (taskId: string) => request<TaskStatusResponse>(`/tasks/${taskId}`),
     execute: (taskId: string) =>
       request<TaskResponse>(`/tasks/${taskId}/execute`, { method: "POST" }),
+    // 生命周期控制
+    pause: (taskId: string) =>
+      request<TaskStatusResponse>(`/tasks/${taskId}/pause`, {
+        method: "POST",
+      }),
+    resume: (taskId: string) =>
+      request<TaskResponse>(`/tasks/${taskId}/resume`, { method: "POST" }),
+    cancel: (taskId: string) =>
+      request<TaskStatusResponse>(`/tasks/${taskId}/cancel`, {
+        method: "POST",
+      }),
+    retry: (taskId: string, fromIndex?: number) =>
+      request<TaskResponse>(`/tasks/${taskId}/retry`, {
+        method: "POST",
+        body: fromIndex === undefined ? {} : { from_index: fromIndex },
+      }),
+    // Human-in-the-loop 审批
+    listApprovals: (taskId: string) =>
+      request<ApprovalRequest[]>(`/tasks/${taskId}/approvals`),
+    approve: (
+      taskId: string,
+      approvalId: string,
+      note?: string,
+      modifiedArgs?: Record<string, unknown>,
+    ) =>
+      request<TaskStatusResponse>(`/tasks/${taskId}/approvals/${approvalId}/approve`, {
+        method: "POST",
+        body: { note: note || null, modified_args: modifiedArgs ?? null },
+      }),
+    reject: (taskId: string, approvalId: string, note?: string) =>
+      request<TaskStatusResponse>(`/tasks/${taskId}/approvals/${approvalId}/reject`, {
+        method: "POST",
+        body: { note: note || null },
+      }),
+  },
+
+  templates: {
+    list: (category?: string) =>
+      request<TemplateListResponse>(
+        category ? `/templates/?category=${encodeURIComponent(category)}` : "/templates/",
+      ),
+    get: (templateId: string) =>
+      request<AgentTemplate>(`/templates/${templateId}`),
+    create: (body: {
+      name: string;
+      description?: string;
+      category?: string;
+      goal_template: string;
+      context_template?: string;
+      tags?: string[];
+    }) =>
+      request<AgentTemplate>("/templates/", { method: "POST", body }),
+    update: (
+      templateId: string,
+      body: Partial<{
+        name: string;
+        description: string;
+        goal_template: string;
+        context_template: string;
+        tags: string[];
+      }>,
+    ) =>
+      request<AgentTemplate>(`/templates/${templateId}`, {
+        method: "PUT",
+        body,
+      }),
+    remove: (templateId: string) =>
+      request<void>(`/templates/${templateId}`, { method: "DELETE" }),
+    run: (templateId: string, body: TemplateRunRequest) =>
+      request<TaskResponse>(`/templates/${templateId}/run`, {
+        method: "POST",
+        body,
+      }),
   },
 
   knowledge: {

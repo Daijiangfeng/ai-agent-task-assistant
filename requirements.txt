@@ -32,10 +32,14 @@ redis>=5.0.0
 chromadb>=0.5.0
 pypdf>=5.0.0
 python-docx>=1.1.0
+# Hybrid Search：BM25 关键词召回（纯 Python）+ 中文分词
+rank-bm25>=0.2.2
+jieba>=0.42.1
 
 # Tools
 tavily-python>=0.5.0
-# sql_query 工具安全层：SQL AST 校验（表/列权限、危险函数检测）
+# sql_query 工具安全层：SQL 语句类型检测（sqlparse）与 AST 校验（表/列权限、危险函数检测）
+sqlparse>=0.5.0
 sqlglot>=25.0.0
 
 # Utils

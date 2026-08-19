@@ -14,6 +14,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from app.agent.state import AgentState
 from app.config.logging import get_logger
 from app.llm.base import BaseLLMProvider
+from app.llm.budget import BudgetExceededError, budgeted_ainvoke
 from app.prompts.manager import PromptManager
 from app.tools.registry import ToolRegistry
 
@@ -43,6 +44,25 @@ class PlannerNode:
         Returns:
             状态更新字典。
         """
+        # 重试路径：携带 retry_from_index 时复用已有计划，跳过 LLM 规划，
+        # 从指定索引继续执行（截断该索引之后的任务结果）。
+        retry_from_index = state.get("retry_from_index")
+        if retry_from_index is not None and state.get("plan"):
+            logger.info(
+                "Planner: 重试模式，复用现有计划",
+                from_index=retry_from_index,
+                version=state["plan_version"],
+            )
+            return {
+                "current_task_index": retry_from_index,
+                "task_results": list(state.get("task_results", []))[
+                    :retry_from_index
+                ],
+                "retry_from_index": None,
+                "should_replan": False,
+                "errors": [],
+            }
+
         logger.info("Planner: 开始规划", goal=state["goal"])
 
         # 获取可用工具描述
@@ -54,7 +74,7 @@ class PlannerNode:
         chain = prompt | self.llm | parser
 
         try:
-            plan = await chain.ainvoke({
+            plan = await budgeted_ainvoke(chain, {
                 "goal": state["goal"],
                 "context": state.get("context") or "无",
                 "available_tools": available_tools,
@@ -82,6 +102,8 @@ class PlannerNode:
                 "errors": [],
             }
 
+        except BudgetExceededError:
+            raise
         except Exception as e:
             logger.error("Planner: 规划失败", error=str(e))
             return {
@@ -116,7 +138,7 @@ class PlannerNode:
         chain = prompt | self.llm | parser
 
         try:
-            new_plan = await chain.ainvoke({
+            new_plan = await budgeted_ainvoke(chain, {
                 "goal": state["goal"],
                 "original_plan": json.dumps(state["plan"], ensure_ascii=False),
                 "task_results": json.dumps(state["task_results"], ensure_ascii=False),
@@ -143,6 +165,8 @@ class PlannerNode:
                 "errors": [],
             }
 
+        except BudgetExceededError:
+            raise
         except Exception as e:
             logger.error("Replanner: 重新规划失败", error=str(e))
             return {

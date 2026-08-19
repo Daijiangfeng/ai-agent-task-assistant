@@ -1,6 +1,6 @@
 """
 LangGraph Agent Workflow 状态机。
-构建 Planner -> Executor -> Reflection 的完整工作流。
+构建 Supervisor(多 Agent 协作) + Planner -> Executor -> Reflection 的完整工作流。
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.executor_node import ExecutorNode
+from app.agent.multi_agent import MODE_MULTI_AGENT, ReviewerNode, SubAgentsNode, SupervisorNode
 from app.agent.planner_node import PlannerNode
 from app.agent.reflection_node import ReflectionNode
 from app.agent.state import AgentState
@@ -23,28 +24,39 @@ class AgentWorkflow:
     """
     Agent Workflow 构建器。
 
-    构建 Planner -> Executor -> Reflection 的 LangGraph 状态机，
-    支持条件路由实现反思驱动的重新规划循环。
+    支持两种执行模式：
+    1. 多 Agent 协作（Supervisor 模式）：用户目标经 Supervisor 编排，
+       分配给 Research/Data/Coding/Writing/Review 子 Agent 协作执行，
+       由 Reviewer 合成最终结果；
+    2. 单 Agent 流程（默认）：Planner -> Executor -> Reflection 状态机，
+       支持反思驱动的重新规划循环。
 
     流程:
-        START -> [Planner] -> [Executor] -> [Reflection]
-                                ^                |
-                                |   (还有任务)    |
-                                +----------------+
-                                |                |
-                                | (不满意+未超限)  |
-                                +--[Replanner]---+
-                                                 |
-                                             (完成/超限) -> END
+        START -> [Supervisor] --multi_agent--> [SubAgents] -> [Reviewer] -> END
+                                  | single
+                                  v
+                              [Planner] -> [Executor] -> [Reflection]
+                                               ^                |
+                                               |   (还有任务)    |
+                                               +----------------+
+                                               |                |
+                                               | (不满意+未超限)  |
+                                               +--[Replanner]---+
+                                                                |
+                                                            (完成/超限) -> END
     """
 
     def __init__(
         self,
         llm_provider: BaseLLMProvider,
         prompt_manager: PromptManager,
+        approval_gate=None,
     ):
+        self.supervisor = SupervisorNode(llm_provider, prompt_manager)
+        self.sub_agents = SubAgentsNode(llm_provider, prompt_manager, approval_gate)
+        self.reviewer = ReviewerNode(llm_provider, prompt_manager)
         self.planner = PlannerNode(llm_provider, prompt_manager)
-        self.executor = ExecutorNode(llm_provider, prompt_manager)
+        self.executor = ExecutorNode(llm_provider, prompt_manager, approval_gate=approval_gate)
         self.reflection = ReflectionNode(llm_provider, prompt_manager)
         self.settings = get_settings()
 
@@ -63,13 +75,32 @@ class AgentWorkflow:
         graph = StateGraph(AgentState)
 
         # 注册节点
+        graph.add_node("supervisor", self.supervisor.run)
+        graph.add_node("sub_agents", self.sub_agents.run)
+        graph.add_node("reviewer", self.reviewer.run)
         graph.add_node("planner", self.planner.run)
         graph.add_node("executor", self.executor.run)
         graph.add_node("reflection", self.reflection.run)
         graph.add_node("replanner", self.planner.replan)
 
         # 定义边
-        graph.add_edge(START, "planner")  # 入口 -> Planner
+        graph.add_edge(START, "supervisor")  # 入口 -> Supervisor
+
+        # 条件边：Supervisor 决定执行模式
+        graph.add_conditional_edges(
+            "supervisor",
+            self._route_after_supervisor,
+            {
+                "multi_agent": "sub_agents",  # 多 Agent 协作
+                "single": "planner",  # 单 Agent 流程
+            },
+        )
+
+        # 多 Agent 协作：子 Agent -> Reviewer -> 结束
+        graph.add_edge("sub_agents", "reviewer")
+        graph.add_edge("reviewer", END)
+
+        # 单 Agent 流程：Planner -> Executor -> Reflection
         graph.add_edge("planner", "executor")  # Planner -> Executor
         graph.add_edge("executor", "reflection")  # Executor -> Reflection
 
@@ -94,6 +125,21 @@ class AgentWorkflow:
 
         logger.info("AgentWorkflow: 状态机编译完成")
         return graph.compile(**compile_kwargs)
+
+    def _route_after_supervisor(self, state: AgentState) -> str:
+        """
+        Supervisor 后的路由决策。
+
+        Returns:
+            "multi_agent"（多 Agent 协作）或 "single"（单 Agent 流程）。
+        """
+        mode = state.get("execution_mode") or "single"
+        mode = str(mode).strip().lower()
+        if mode == MODE_MULTI_AGENT and state.get("agent_assignments"):
+            logger.info("Workflow: 进入多 Agent 协作")
+            return "multi_agent"
+        logger.info("Workflow: 进入单 Agent 流程")
+        return "single"
 
     def _route_after_reflection(self, state: AgentState) -> str:
         """

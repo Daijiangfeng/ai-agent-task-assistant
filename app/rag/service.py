@@ -13,6 +13,7 @@ from app.config.settings import Settings, get_settings
 from app.llm.embeddings import BaseEmbeddingProvider
 from app.llm.factory import create_embedding_provider
 from app.rag.base import BaseReranker, Document
+from app.rag.hybrid_retriever import HybridRetriever
 from app.rag.indexer import RAG_COLLECTION, ChromaIndexer
 from app.rag.reranker import ZhipuReranker
 from app.rag.retriever import ChromaRetriever
@@ -46,6 +47,15 @@ class RAGService:
         splitter = TextSplitter(self._settings)
         self._indexer = ChromaIndexer(self._embedding, self._store, splitter)
         self._retriever = ChromaRetriever(self._embedding, self._store)
+        # 混合检索（BM25 + 向量 RRF 融合）：开关开启时替代纯向量召回
+        self._hybrid_retriever: HybridRetriever | None = None
+        if self._settings.ENABLE_HYBRID_SEARCH:
+            self._hybrid_retriever = HybridRetriever(
+                self._embedding,
+                self._store,
+                RAG_COLLECTION,
+                self._settings,
+            )
         # 可插拔精排层：未注入且开关开启时默认使用智谱 Rerank
         if reranker is not None:
             self._reranker = reranker
@@ -73,10 +83,12 @@ class RAGService:
 
     async def search(self, query: str, top_k: int | None = None) -> list[dict[str, Any]]:
         """
-        语义检索相关文档片段。
+        检索相关文档片段（混合检索可选）。
 
+        ENABLE_HYBRID_SEARCH 开启时：BM25 关键词召回 + 向量语义召回经 RRF
+        融合（提升专有名词/编号/型号命中）；关闭时仅向量召回。
         ENABLE_RERANK 开启时：先召回 RETRIEVAL_TOP_K 候选，再经智谱 Rerank
-        精排与阈值过滤后取前 top_k；rerank 失败时自动回退向量序结果。
+        精排与阈值过滤后取前 top_k；rerank 失败时自动回退召回序结果。
 
         Args:
             query: 查询文本。
@@ -87,6 +99,9 @@ class RAGService:
         """
         if self._reranker is not None and self._settings.ENABLE_RERANK:
             documents = await self._search_with_rerank(query, top_k)
+        elif self._hybrid_retriever is not None:
+            k = top_k or self._settings.RAG_TOP_K
+            documents = await self._hybrid_retriever.retrieve(query, top_k=k)
         else:
             k = top_k or self._settings.RAG_TOP_K
             documents = await self._retriever.retrieve(query, top_k=k)
@@ -96,15 +111,21 @@ class RAGService:
         self, query: str, top_k: int | None
     ) -> list[Document]:
         """
-        召回 + Rerank 精排流程（失败时降级回退向量序）。
+        召回 + Rerank 精排流程（失败时降级回退召回序）。
 
-        流程：向量召回 RETRIEVAL_TOP_K 候选 -> rerank -> 按
+        召回路径：混合检索开启时走 BM25+向量 RRF，否则纯向量。
+        流程：召回 RETRIEVAL_TOP_K 候选 -> rerank -> 按
         RERANK_SCORE_THRESHOLD 过滤 -> 取前 top_k（默认 RERANK_TOP_K）。
         """
         k = top_k or self._settings.RERANK_TOP_K
-        candidates = await self._retriever.retrieve(
-            query, top_k=self._settings.RETRIEVAL_TOP_K
-        )
+        if self._hybrid_retriever is not None:
+            candidates = await self._hybrid_retriever.retrieve(
+                query, top_k=self._settings.RETRIEVAL_TOP_K
+            )
+        else:
+            candidates = await self._retriever.retrieve(
+                query, top_k=self._settings.RETRIEVAL_TOP_K
+            )
         if not candidates:
             return []
 

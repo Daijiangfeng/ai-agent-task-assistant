@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cx } from "../lib/cx";
 import styles from "./Table.module.css";
 
 interface Column<T> {
@@ -14,10 +15,17 @@ interface TableProps<T> {
   rows: T[];
   rowKey: (row: T) => string;
   onRowClick?: (row: T) => void;
+  rowClassName?: (row: T) => string | undefined;
 }
 
 /** 发丝分隔线数据表。 */
-export function Table<T>({ columns, rows, rowKey, onRowClick }: TableProps<T>) {
+export function Table<T>({
+  columns,
+  rows,
+  rowKey,
+  onRowClick,
+  rowClassName,
+}: TableProps<T>) {
   return (
     <div className={styles.scroll}>
       <table className={styles.table}>
@@ -37,7 +45,10 @@ export function Table<T>({ columns, rows, rowKey, onRowClick }: TableProps<T>) {
           {rows.map((row) => (
             <tr
               key={rowKey(row)}
-              className={onRowClick ? styles.clickable : undefined}
+              className={cx(
+                onRowClick ? styles.clickable : undefined,
+                rowClassName?.(row),
+              )}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
               {columns.map((col) => (

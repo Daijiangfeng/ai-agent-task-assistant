@@ -95,6 +95,30 @@ class Settings(BaseSettings):
     # ---- Web Search (Tavily) ----
     TAVILY_API_KEY: str = Field(default="", description="Tavily 搜索 API Key")
     WEB_SEARCH_MAX_RESULTS: int = Field(default=5, ge=1, le=20)
+    WEB_SEARCH_CACHE_TTL: int = Field(
+        default=21600,
+        ge=0,
+        description="普通知识搜索结果的进程内缓存 TTL（秒）；0 表示不缓存",
+    )
+    WEB_SEARCH_TIME_SENSITIVE_CACHE_TTL: int = Field(
+        default=300,
+        ge=0,
+        description="时效性搜索结果的缓存 TTL（秒）；'今天/刚刚/当前'等强时效问题将绕过缓存",
+    )
+    WEB_SEARCH_ENABLE_LLM_INTENT: bool = Field(
+        default=False,
+        description="是否叠加 LLM 做意图分类（默认关闭，使用确定性规则）",
+    )
+    # 来源质量分域配置（通用机制，可按需补充候选域名；不做硬编码单点判断）。
+    WEB_SEARCH_OFFICIAL_DOMAINS: list[str] = Field(
+        default=[], description="官方一手来源域名（含子域匹配）"
+    )
+    WEB_SEARCH_TRUSTED_DOMAINS: list[str] = Field(
+        default=[], description="可信来源域名"
+    )
+    WEB_SEARCH_LOW_QUALITY_DOMAINS: list[str] = Field(
+        default=[], description="低质/内容农场域名"
+    )
 
     # ---- Chroma 向量库 ----
     CHROMA_PERSIST_DIR: str = Field(
@@ -120,6 +144,31 @@ class Settings(BaseSettings):
     RAG_CHUNK_SIZE: int = Field(default=800, ge=100)
     RAG_CHUNK_OVERLAP: int = Field(default=100, ge=0)
     RAG_TOP_K: int = Field(default=5, ge=1, le=50)
+
+    # ---- RAG 动态分块（按文档类型选择 chunk 参数） ----
+    # 开启后按文档 type/扩展名匹配分块画像：代码类大块（1500/150），
+    # 法律类小块（500/50），其余用 RAG_CHUNK_SIZE/RAG_CHUNK_OVERLAP 默认值。
+    RAG_DYNAMIC_CHUNKING: bool = Field(
+        default=True, description="是否按文档类型动态选择分块参数"
+    )
+
+    # ---- RAG Hybrid Search（BM25 + 向量检索 RRF 融合） ----
+    ENABLE_HYBRID_SEARCH: bool = Field(
+        default=False,
+        description=(
+            "是否启用混合检索：BM25 关键词召回 + 向量语义召回经 "
+            "Reciprocal Rank Fusion 融合（提升专有名词/编号/型号命中）"
+        ),
+    )
+    HYBRID_VECTOR_RECALL_K: int = Field(
+        default=20, ge=1, le=128, description="混合检索中向量召回候选数"
+    )
+    HYBRID_BM25_RECALL_K: int = Field(
+        default=20, ge=1, le=128, description="混合检索中 BM25 关键词召回候选数"
+    )
+    HYBRID_RRF_K: int = Field(
+        default=60, ge=1, description="RRF 融合常数（k，越大越平滑）"
+    )
 
     # ---- RAG Rerank 精排配置（智谱 rerank 模型） ----
     ENABLE_RERANK: bool = Field(
@@ -165,6 +214,72 @@ class Settings(BaseSettings):
     )
     MAX_EXECUTION_STEPS: int = Field(
         default=10, ge=1, description="单任务最大执行步骤，防止无限循环"
+    )
+    MAX_AGENT_STEPS: int = Field(
+        default=10, ge=1, description="单任务最大 Agent 执行轮数（多 Agent 协作上限），防止无限循环"
+    )
+    SUB_AGENT_TIMEOUT_SECONDS: float = Field(
+        default=60.0,
+        ge=1,
+        description=(
+            "单个子 Agent / Reviewer 的 LLM 调用超时（秒），"
+            "防止外部模型挂起导致系统无限等待"
+        ),
+    )
+
+    # ---- 工具审批（HITL）策略 ----
+    # 触发人工审批的最低工具风险等级：L2（默认，仅高风险）/ L1（有业务影响）/ L0（全部）。
+    # 只读、无副作用的工具（web_search 等）默认 L0，不触发 HITL。
+    TOOL_APPROVAL_LEVEL: str = Field(
+        default="L2",
+        description=(
+            "触发人工审批（HITL）的最低工具风险等级：L2（默认，仅高风险）/ "
+            "L1（有业务影响）/ L0（全部工具）"
+        ),
+    )
+    # 显式覆盖：强制要求审批的工具名列表（优先级高于风险分级），空列表表示不覆盖。
+    TOOL_APPROVAL_OVERRIDE_TOOLS: list[str] = Field(
+        default=[], description="强制要求人工审批的工具名列表（覆盖风险分级）"
+    )
+
+    # ---- LLM 成本控制（单任务预算） ----
+    # 0 表示不限制。超限时任务终止并标记 FAILED（BudgetExceededError）。
+    MAX_LLM_CALLS_PER_TASK: int = Field(
+        default=20, ge=0, description="单任务最大 LLM 调用次数（0=不限）"
+    )
+    MAX_TOTAL_TOKENS_PER_TASK: int = Field(
+        default=50000, ge=0, description="单任务最大 token 消耗（prompt+completion，0=不限）"
+    )
+    BUDGET_LIMIT_USD: float = Field(
+        default=0.0, ge=0.0, description="单任务成本上限（美元，0=不限）"
+    )
+    LLM_INPUT_COST_PER_1M: float = Field(
+        default=0.0, ge=0.0,
+        description="每百万输入 token 价格（美元），用于成本估算与预算核算",
+    )
+    LLM_OUTPUT_COST_PER_1M: float = Field(
+        default=0.0, ge=0.0,
+        description="每百万输出 token 价格（美元），用于成本估算与预算核算",
+    )
+
+    # ---- 任务队列（异步化：API 入队，Worker 消费） ----
+    # auto: 优先 Redis（可靠持久队列），不可用则降级进程内内存队列；
+    # redis: 强制 Redis；memory: 强制内存队列（单进程开发/测试）。
+    TASK_QUEUE_BACKEND: str = Field(
+        default="auto", description="任务队列后端：auto | redis | memory"
+    )
+    TASK_QUEUE_EMBEDDED_WORKER: bool = Field(
+        default=True,
+        description=(
+            "是否在应用进程内启动内置 Worker 消费任务队列。"
+            "多进程/生产部署（独立 python -m app.worker）时设为 false"
+        ),
+    )
+    REDIS_QUEUE_KEY: str = Field(
+        default="agent:tasks:queue", description="Redis 任务队列键名"
+    )
+    QUEUE_DEQUEUE_TIMEOUT: float = Field(
+        default=1.0, ge=0.1, le=30, description="Worker 拉取任务超时（秒）"
     )
 
     # ---- 计算属性 ----

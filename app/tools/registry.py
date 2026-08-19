@@ -23,8 +23,21 @@ class ToolRegistry:
 
         Args:
             tool: BaseTool 子类实例。
+
+        重复注册同名工具：覆盖旧实例并记录告警（防重复注册但不阻断）。
         """
+        if tool.name in cls._tools and cls._tools[tool.name] is not tool:
+            from app.config.logging import get_logger
+
+            get_logger(__name__).warning(
+                "ToolRegistry: 覆盖同名工具", name=tool.name
+            )
         cls._tools[tool.name] = tool
+
+    @classmethod
+    def unregister(cls, name: str) -> None:
+        """注销工具（不存在则静默忽略）。"""
+        cls._tools.pop(name, None)
 
     @classmethod
     def get(cls, name: str) -> BaseTool | None:
@@ -67,6 +80,27 @@ class ToolRegistry:
         用于传递给 Agent。
         """
         return [tool.to_langchain_tool() for tool in cls._tools.values()]
+
+    @classmethod
+    def get_tools_by_categories(cls, categories: set[str]) -> list[BaseTool]:
+        """
+        按工具类别过滤已注册工具（多 Agent 角色工具范围控制用）。
+
+        Args:
+            categories: 允许的工具类别集合（如 {network, rag}）。
+
+        Returns:
+            类别匹配的工具实例列表。
+        """
+        return [t for t in cls._tools.values() if t.category in categories]
+
+    @classmethod
+    def get_langchain_tools_by_categories(cls, categories: set[str]) -> list:
+        """获取指定类别工具的 LangChain Tool 对象列表。"""
+        return [
+            t.to_langchain_tool()
+            for t in cls.get_tools_by_categories(categories)
+        ]
 
     @classmethod
     def clear(cls) -> None:

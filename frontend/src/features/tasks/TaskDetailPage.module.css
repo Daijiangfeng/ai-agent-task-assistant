@@ -155,6 +155,124 @@
   margin-top: var(--space-4);
 }
 
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.approvalHint {
+  display: inline-flex;
+  align-items: center;
+  color: var(--status-approval);
+  font-size: 14px;
+  font-weight: var(--weight-semibold);
+}
+
+.approvalReason {
+  color: var(--ink-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.fieldLabel {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.argsEditor {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--parchment);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  resize: vertical;
+}
+
+.argsError {
+  margin-top: var(--space-2);
+  color: var(--status-failed);
+  font-size: 13px;
+}
+
+.approvalActions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.approvalList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.approvalItem {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.approvalHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.approvalTool {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+}
+
+.approvalMeta {
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+.agents {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.agent {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.agentHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.agentRole {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+}
+
+.agentObjective {
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
 @media (max-width: 700px) {
   .scores {
     grid-template-columns: repeat(2, 1fr);

@@ -37,6 +37,18 @@
   color: var(--status-replanning);
   background: rgba(191, 90, 242, 0.1);
 }
+.pill[data-status="awaiting_approval"] {
+  color: var(--status-approval);
+  background: rgba(255, 152, 0, 0.12);
+}
+.pill[data-status="paused"] {
+  color: var(--status-paused);
+  background: rgba(120, 144, 156, 0.12);
+}
+.pill[data-status="cancelled"] {
+  color: var(--status-cancelled);
+  background: rgba(108, 117, 125, 0.12);
+}
 .pill[data-status="completed"] {
   color: var(--status-completed);
   background: rgba(36, 138, 61, 0.1);

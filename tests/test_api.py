@@ -101,6 +101,34 @@ class TestTaskAPI:
         data = response.json()
         assert len(data["tasks"]) <= 1
 
+    def test_list_tasks_filter_by_status(
+        self, client: TestClient, memory_task_service
+    ):
+        """测试按状态过滤列表（审批待办等场景）。"""
+        import asyncio
+
+        from app.models.task import TaskStatus
+
+        created = client.post("/api/v1/tasks/", json={"goal": "状态过滤测试"})
+        task_id = created.json()["task_id"]
+        asyncio.run(
+            memory_task_service.update_task_status(task_id, TaskStatus.PAUSED)
+        )
+
+        pending = client.get("/api/v1/tasks/?status=pending").json()
+        paused = client.get("/api/v1/tasks/?status=paused").json()
+        cancelled = client.get("/api/v1/tasks/?status=cancelled").json()
+
+        assert all(t["status"] == "pending" for t in pending["tasks"])
+        assert all(t["status"] == "paused" for t in paused["tasks"])
+        assert any(t["task_id"] == task_id for t in paused["tasks"])
+        assert all(t["status"] == "cancelled" for t in cancelled["tasks"])
+
+    def test_list_tasks_invalid_status_422(self, client: TestClient):
+        """非法状态值返回 422。"""
+        response = client.get("/api/v1/tasks/?status=not_a_status")
+        assert response.status_code == 422
+
     def test_get_task_status(self, client: TestClient):
         """测试查询任务状态。"""
         # 先创建任务

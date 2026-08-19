@@ -285,9 +285,15 @@ class SQLQueryTool(BaseTool):
         except Exception:
             return "SQL 语法无法解析，已拒绝执行"
 
-        # 禁止的危险函数（load_extension / randomblob / zeroblob 等）
-        for node in ast.find_all(exp.Anonymous):
-            name = str(getattr(node, "this", "") or "").lower()
+        # 禁止的危险函数（load_extension / randomblob / zeroblob 等）。
+        # 注意：sqlglot 将匿名函数解析为 exp.Anonymous（函数名在 this），
+        # 将内置函数（如 randomblob/zeroblob）解析为专用函数节点
+        # （sql_name 取类名后缀），故统一取 this 优先、sql_name 兜底。
+        for node in ast.find_all(exp.Func):
+            name = (
+                str(getattr(node, "this", "") or "")
+                or str(getattr(node, "sql_name", lambda: "")() or "")
+            ).lower()
             if name in _FORBIDDEN_FUNCTIONS:
                 return f"禁止使用危险函数: {name}()"
 

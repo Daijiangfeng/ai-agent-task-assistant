@@ -32,13 +32,21 @@ def client():
     """创建测试客户端。
 
     覆盖 get_rag_service 为离线桩，避免依赖 .env 中的 ANTHROPIC_AUTH_TOKEN，
-    与 AGENTS.md「测试全部离线可跑」保持一致。
+    与 AGENTS.md「测试全部离线可跑」保持一致；
+    覆盖 get_task_service 为内存后端，避免 auto 模式读写真实 PostgreSQL
+    （asyncpg 引擎绑定首个事件循环，跨 TestClient 会触发 loop 冲突）。
     """
+    from app.api.deps import get_task_service
+    from app.services.task_service import TaskService
+
     app.dependency_overrides[get_rag_service] = lambda: _StubRAGService()
+    memory_service = TaskService(Settings(TASK_STORAGE_BACKEND="memory"))
+    app.dependency_overrides[get_task_service] = lambda: memory_service
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_rag_service, None)
+        app.dependency_overrides.pop(get_task_service, None)
 
 
 class TestStatsAndToolsAPI:

@@ -15,6 +15,7 @@ from app.agent.state import AgentState
 from app.config.logging import get_logger
 from app.config.settings import get_settings
 from app.llm.base import BaseLLMProvider
+from app.llm.budget import BudgetExceededError, budgeted_ainvoke
 from app.prompts.manager import PromptManager
 
 logger = get_logger(__name__)
@@ -75,7 +76,7 @@ class ReflectionNode:
         chain = prompt | self.llm | parser
 
         try:
-            reflection = await chain.ainvoke({
+            reflection = await budgeted_ainvoke(chain, {
                 "goal": state["goal"],
                 "plan": json.dumps(plan, ensure_ascii=False),
                 "task_results": json.dumps(task_results, ensure_ascii=False),
@@ -115,6 +116,8 @@ class ReflectionNode:
                 "errors": [],
             }
 
+        except BudgetExceededError:
+            raise
         except Exception as e:
             logger.error("Reflection: 评估失败", error=str(e))
 

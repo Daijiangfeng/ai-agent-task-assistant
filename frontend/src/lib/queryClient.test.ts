@@ -13,6 +13,10 @@ function makeTask(status: TaskStatusResponse["status"]): TaskStatusResponse {
     reflection: null,
     iteration_count: 0,
     plan_version: 1,
+    execution_mode: null,
+    agent_results: [],
+    pending_approval: null,
+    approval_history: [],
     error: null,
     final_result: null,
   };
@@ -31,5 +35,11 @@ describe("taskRefetchInterval", () => {
   it("到达终态停止轮询", () => {
     expect(taskRefetchInterval(makeTask("completed"))).toBe(false);
     expect(taskRefetchInterval(makeTask("failed"))).toBe(false);
+    expect(taskRefetchInterval(makeTask("cancelled"))).toBe(false);
+  });
+
+  it("等待人工介入或暂停时停止轮询", () => {
+    expect(taskRefetchInterval(makeTask("awaiting_approval"))).toBe(false);
+    expect(taskRefetchInterval(makeTask("paused"))).toBe(false);
   });
 });

@@ -1,7 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api } from "../../lib/apiClient";
 import { queryKeys } from "../../lib/queryClient";
-import { Card, EmptyState, PageHeader, Spinner, StatusPill } from "../../components";
+import {
+  Card,
+  EmptyState,
+  PageHeader,
+  Spinner,
+  StatusPill,
+} from "../../components";
 import type { TaskStatus } from "../../lib/types";
 import styles from "./DashboardPage.module.css";
 
@@ -11,14 +18,25 @@ const STATUS_ORDER: TaskStatus[] = [
   "executing",
   "reflecting",
   "replanning",
+  "awaiting_approval",
+  "paused",
+  "cancelled",
   "completed",
   "failed",
 ];
+
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 12)}…` : id;
+}
 
 export default function DashboardPage() {
   const statsQuery = useQuery({ queryKey: queryKeys.stats, queryFn: api.stats.get });
   const toolsQuery = useQuery({ queryKey: queryKeys.tools, queryFn: api.tools.list });
   const healthQuery = useQuery({ queryKey: queryKeys.health, queryFn: api.health });
+  const approvalsQuery = useQuery({
+    queryKey: [...queryKeys.tasks, "approval-pending"],
+    queryFn: () => api.tasks.list(50, 0, "awaiting_approval"),
+  });
 
   if (statsQuery.isLoading) {
     return (
@@ -38,12 +56,16 @@ export default function DashboardPage() {
   }
 
   const stats = statsQuery.data;
+  const pendingCount = stats.tasks_by_status?.["awaiting_approval"] ?? 0;
+  const pausedCount = stats.tasks_by_status?.["paused"] ?? 0;
   const metrics = [
     { label: "任务总数", value: stats.task_total },
     { label: "可用工具", value: stats.tool_count },
     { label: "知识文档", value: stats.knowledge_document_count },
     { label: "知识分块", value: stats.knowledge_chunk_count },
   ];
+
+  const pendingApprovals = approvalsQuery.data?.tasks ?? [];
 
   return (
     <div>
@@ -94,6 +116,59 @@ export default function DashboardPage() {
               </dd>
             </div>
           </dl>
+        </Card>
+      </section>
+
+      <section className={styles.approvalsSection}>
+        <Card className={styles.panel}>
+          <div className={styles.approvalsHead}>
+            <h3 className={styles.panelTitle}>
+              审批待办
+              {pendingCount > 0 ? (
+                <span className={styles.approvalBadge}>{pendingCount}</span>
+              ) : null}
+            </h3>
+            {pendingApprovals.length > 0 ? (
+              <Link className={styles.approvalsLink} to="/tasks">
+                去任务列表处理 →
+              </Link>
+            ) : null}
+          </div>
+          {approvalsQuery.isLoading ? (
+            <Spinner label="加载待办…" />
+          ) : pendingApprovals.length > 0 ? (
+            <ul className={styles.approvalList}>
+              {pendingApprovals.map((task) => (
+                <li key={task.task_id}>
+                  <Link
+                    className={styles.approvalItem}
+                    to={`/tasks/${task.task_id}`}
+                  >
+                    <span className={styles.approvalGoal}>
+                      {task.plan?.goal ?? `任务 ${shortId(task.task_id)}`}
+                    </span>
+                    <span className={styles.approvalTime}>
+                      {new Date(task.created_at).toLocaleString()}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState title="没有待审批任务" description="一切正常。" />
+          )}
+        </Card>
+        <Card className={styles.panel}>
+          <h3 className={styles.panelTitle}>已暂停任务</h3>
+          <div className={styles.statusList}>
+            <div className={styles.statusRow}>
+              <StatusPill status="paused" />
+              <span className={styles.statusCount}>{pausedCount}</span>
+            </div>
+          </div>
+          <p className={styles.hint}>
+            暂停任务可通过任务详情页的「恢复执行」断点续跑。
+          </p>
         </Card>
       </section>
 

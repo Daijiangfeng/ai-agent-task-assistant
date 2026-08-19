@@ -33,6 +33,9 @@
   --status-executing: #0071e3;
   --status-reflecting: #5e5ce6;
   --status-replanning: #bf5af2;
+  --status-approval: #ff9800;
+  --status-paused: #78909c;
+  --status-cancelled: #6c757d;
   --status-completed: #248a3d;
   --status-failed: #d70015;
 

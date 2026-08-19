@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.config.logging import get_logger
-from app.config.settings import get_settings
+from app.config.settings import Settings, get_settings
 from app.tools.base import BaseTool, ToolInput, ToolOutput
 from app.tools.security import ToolContext
 
@@ -160,3 +160,53 @@ def register_builtin_tools() -> None:
         logger.info("已注册 Web 搜索工具")
     else:
         logger.info("未配置 TAVILY_API_KEY，跳过 Web 搜索工具注册")
+
+    # ---- 五类能力工具集（Observe/Reason/Act/Remember/Interact）----
+    register_five_category_tools(settings)
+
+
+def register_five_category_tools(settings: Settings | None = None) -> None:
+    """
+    注册面向统一 Tool Runtime 的五类能力工具（Observe/Reason/Act/Remember/Interact）。
+
+    - 依赖基础设施的工具（http.request/github.create_pr）标记 unavailable，
+      需接入端点/凭据后方可启用；email.send 使用内存通道（仅流程验证）。
+    - Act 副作用工具在 Agent 调用时要求审批（ToolExecutor/审批闸门）。
+    """
+    settings = settings or get_settings()
+    from app.tools.data_transform import DataTransformTool
+    from app.tools.database_write import DatabaseWriteTool
+    from app.tools.email_tool import EmailTool
+    from app.tools.github_tool import GitHubCreatePRTool
+    from app.tools.http_action import HTTPActionTool
+    from app.tools.http_read import HTTPReadTool
+    from app.tools.registry import ToolRegistry
+
+    # Observe
+    ToolRegistry.register(HTTPReadTool(settings))
+    # Reason
+    from app.tools.code_execution import CodeExecutionTool
+
+    ToolRegistry.register(CodeExecutionTool())
+    ToolRegistry.register(DataTransformTool())
+    # Act
+    ToolRegistry.register(HTTPActionTool(settings))
+    ToolRegistry.register(EmailTool())
+    ToolRegistry.register(DatabaseWriteTool(settings))
+    ToolRegistry.register(GitHubCreatePRTool())
+    # Remember
+    from app.tools.memory_tools import (
+        MemoryDeleteTool,
+        MemoryGetTool,
+        MemorySearchTool,
+        MemorySetTool,
+    )
+
+    for tool in (MemoryGetTool, MemorySetTool, MemorySearchTool, MemoryDeleteTool):
+        ToolRegistry.register(tool(settings))
+    # Interact
+    from app.tools.interact_tools import UserApprovalTool, UserAskTool, UserMessageTool
+
+    for tool in (UserMessageTool, UserAskTool, UserApprovalTool):
+        ToolRegistry.register(tool())
+    logger.info("已注册五类能力工具集（Observe/Reason/Act/Remember/Interact）")

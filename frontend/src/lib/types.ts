@@ -9,8 +9,36 @@ export type TaskStatus =
   | "executing"
   | "reflecting"
   | "replanning"
+  | "awaiting_approval"
+  | "paused"
+  | "cancelled"
   | "completed"
   | "failed";
+
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+
+export interface ApprovalRequest {
+  id: string;
+  task_id: string;
+  tool_name: string;
+  args: Record<string, unknown>;
+  reason: string;
+  status: ApprovalStatus;
+  created_at: string;
+  decided_at: string | null;
+  decision_note: string | null;
+  modified_args: Record<string, unknown> | null;
+}
+
+export interface AgentResult {
+  role: string;
+  agent_name: string | null;
+  objective: string | null;
+  result: string | null;
+  status: string;
+  error: string | null;
+  latency_ms: number | null;
+}
 
 export interface SubTask {
   id: string;
@@ -55,8 +83,36 @@ export interface TaskStatusResponse {
   reflection: ReflectionResult | null;
   iteration_count: number;
   plan_version: number;
+  execution_mode: string | null;
+  agent_results: AgentResult[];
+  pending_approval: ApprovalRequest | null;
+  approval_history: ApprovalRequest[];
   error: string | null;
   final_result: string | null;
+}
+
+export interface AgentTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  goal_template: string;
+  context_template: string | null;
+  tags: string[];
+  variables: string[];
+  is_builtin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateListResponse {
+  total: number;
+  templates: AgentTemplate[];
+}
+
+export interface TemplateRunRequest {
+  inputs: Record<string, string>;
+  auto_execute: boolean;
 }
 
 export interface TaskListResponse {
@@ -121,8 +177,22 @@ export interface StatsResponse {
 }
 
 /** 终态：到达后停止轮询。 */
-export const TERMINAL_STATUSES: TaskStatus[] = ["completed", "failed"];
+export const TERMINAL_STATUSES: TaskStatus[] = [
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+/** 等待人工介入或已暂停：无需自动轮询（用户操作后手动刷新）。 */
+export const STUCK_STATUSES: TaskStatus[] = [
+  "paused",
+  "awaiting_approval",
+];
 
 export function isTerminal(status: TaskStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
+}
+
+export function isStuck(status: TaskStatus): boolean {
+  return STUCK_STATUSES.includes(status);
 }

@@ -10,6 +10,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.tools.schema import (
+    TOOL_CATEGORY_BY_LEGACY,
+    ExecutionMode,
+    ToolCategory,
+    ToolSchema,
+)
 from app.tools.security import (
     CATEGORY_SYSTEM,
     ToolContext,
@@ -40,6 +46,42 @@ class BaseTool(ABC):
     """
 
     category: str = CATEGORY_SYSTEM
+
+    # ---- 统一 Tool Runtime 元数据（五类能力/Schema/权限/执行模式）----
+    # 新工具保留 category 为旧类别字符串（兼容既有权限矩阵与 multi_agent 作用域），
+    # 同时用 runtime_category 声明其五类能力归属（Observe/Reason/Act/Remember/Interact）。
+    runtime_category: ToolCategory | None = None
+    execution_mode: ExecutionMode = ExecutionMode.SYNC
+    timeout: float | None = None  # 执行超时（秒）；None 用 ToolExecutor 默认
+    permissions: frozenset[str] = frozenset()  # 所需权限字符串，如 {"observe:web"}
+    metadata: dict[str, Any] = {}  # 附加元数据（idempotent/risk/version 等）
+    available: bool = True  # 基础设施是否就绪（Mock 实现为 False）
+    input_schema: dict[str, Any] | None = None  # JSON Schema 风格入参
+    output_schema: dict[str, Any] | None = None  # JSON Schema 风格出参
+    required_params: list[str] = []  # 必填参数名（调用前参数完整性检查用）
+
+    def to_schema(self) -> ToolSchema:
+        """生成统一 ToolSchema（用于 LLM Function Calling 与权限/校验）。"""
+        runtime_cat = self.runtime_category or TOOL_CATEGORY_BY_LEGACY.get(
+            self.category, ToolCategory.REASON
+        )
+        return ToolSchema(
+            name=self.name,
+            description=self.description,
+            category=runtime_cat,
+            input_schema=self.input_schema,
+            output_schema=self.output_schema,
+            required_params=list(self.required_params),
+            permissions=frozenset(self.permissions),
+            execution_mode=self.execution_mode,
+            timeout=self.timeout,
+            available=self.available,
+            metadata=dict(self.metadata),
+        )
+
+    def to_function_schema(self) -> dict[str, Any]:
+        """转换为 LLM Function Calling 的 tool schema（dict 形式）。"""
+        return self.to_schema().to_function_schema()
 
     def _authorize(self, context: ToolContext | None) -> str | None:
         """
@@ -96,12 +138,17 @@ class BaseTool(ABC):
         from langchain_core.tools import StructuredTool
 
         async def _arun(
-            query: str = "", parameters: dict[str, Any] | None = None
+            query: str = "",
+            parameters: dict[str, Any] | None = None,
+            **kwargs: Any,
         ) -> str:
-            # 同时转发自由文本 query 与结构化 parameters，
-            # 使 sql_query / file_processing 等需要结构化入参的工具可正确取参。
+            # 编译入参：query 为自由文本；parameters 为结构化参数；
+            # 其余 keyword 参数（来自工具 input_schema 的具名入参）合并进 parameters，
+            # 使 code.execute / http.get / database.write 等 schema 驱动工具可正确取参。
+            params = dict(parameters or {})
+            params.update(kwargs)
             result = await self.execute(
-                ToolInput(query=query, parameters=parameters or {})
+                ToolInput(query=query, parameters=params)
             )
             if result.success:
                 return str(result.data)
